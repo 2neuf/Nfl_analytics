@@ -1,4 +1,4 @@
-
-streamlit>=1.30.0
-pandas>=2.0.0
-nfl_data_py>=0.3.1
+streamlit
+pandas
+pyarrow<25
+nflreadpy
