@@ -19,27 +19,26 @@ st.info(f"💡 Données de référence basées sur la saison **{base_year}**.")
 
 # Sidebar
 st.sidebar.header("Paramètres 2026")
-
 available_weeks = sorted(schedule_2026['week'].unique())
 selected_week = st.sidebar.selectbox("Semaine NFL", options=available_weeks, index=0)
 selected_position = st.sidebar.multiselect("Position", options=["QB", "RB", "WR", "TE"], default=["WR", "RB"])
 stat_type = st.sidebar.selectbox("Pari ciblé", options=["Receiving Yards", "Rushing Yards", "Passing Yards"])
 
-# Normalisation du nom de colonne d'équipe dans le roster
-team_col = 'team' if 'team' in roster_2026.columns else 'team_abbr'
-
-# Filtrage Matchups
+# Matchups
 week_schedule = schedule_2026[schedule_2026['week'] == selected_week]
-home_teams = week_schedule[['home_team', 'away_team']].rename(columns={'home_team': team_col, 'away_team': 'opponent_team'})
-away_teams = week_schedule[['away_team', 'home_team']].rename(columns={'away_team': team_col, 'home_team': 'opponent_team'})
+home_teams = week_schedule[['home_team', 'away_team']].rename(columns={'home_team': 'team', 'away_team': 'opponent_team'})
+away_teams = week_schedule[['away_team', 'home_team']].rename(columns={'away_team': 'team', 'home_team': 'opponent_team'})
 matchups_2026 = pd.concat([home_teams, away_teams])
 
-# Fusion Roster / Calendrier
-df_merged = pd.merge(roster_2026, matchups_2026, on=team_col, how='inner')
+# Merge Roster / Calendrier
+df_merged = pd.merge(roster_2026, matchups_2026, on='team', how='inner')
 df_merged = df_merged[df_merged['position'].isin(selected_position)]
 
-# Fusion Stats Joueurs & Défenses
-df_merged = pd.merge(df_merged, players_df, on='player_id', how='left')
+# Fusion Stats Joueurs (Secours sur player_name si player_id absent)
+merge_key = 'player_id' if ('player_id' in df_merged.columns and 'player_id' in players_df.columns) else 'player_name'
+df_merged = pd.merge(df_merged, players_df, on=merge_key, how='left')
+
+# Fusion Défenses
 df_merged = pd.merge(df_merged, def_df, left_on='opponent_team', right_on='opponent_team', how='left')
 
 if stat_type == "Receiving Yards":
@@ -57,12 +56,12 @@ st.subheader(f"Matchups Semaine {selected_week}")
 
 name_col = 'player_name_x' if 'player_name_x' in df_merged.columns else 'player_name'
 pos_col = 'position_x' if 'position_x' in df_merged.columns else 'position'
-cols_display = [name_col, pos_col, team_col, 'opponent_team', m_avg, m_l3, def_rank, 'Mismatch Alert']
+cols_display = [name_col, pos_col, 'team', 'opponent_team', m_avg, m_l3, def_rank, 'Mismatch Alert']
 
 res_df = df_merged[cols_display].rename(columns={
     name_col: 'Joueur',
     pos_col: 'Pos',
-    team_col: 'Équipe',
+    'team': 'Équipe',
     'opponent_team': 'Adversaire',
     m_avg: f'Moyenne ({base_year})',
     m_l3: 'Derniers Matchs',
