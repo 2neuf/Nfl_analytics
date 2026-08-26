@@ -1,79 +1,74 @@
 import streamlit as st
 import pandas as pd
-from data_loader import load_weekly_data, calculate_player_metrics, calculate_defense_rankings
+from data_loader import load_data_for_2026_season, calculate_2025_player_baselines, calculate_2025_defense_rankings
 
-st.set_page_config(page_title="NFL Mismatch Finder", layout="wide")
-
-st.title("🏈 NFL Mismatch Finder — Dynamic Betting Dashboard")
+st.set_page_config(page_title="NFL Mismatch Finder 2026", layout="wide")
+st.title("🏈 NFL 2026 Mismatch Finder (Basé sur les stats 2025)")
 
 @st.cache_data(ttl=3600)
-def get_data():
-    raw_data = load_weekly_data(years=[2024])
-    players_data = calculate_player_metrics(raw_data)
-    defense_data = calculate_defense_rankings(raw_data)
-    return players_data, defense_data
+def get_dashboard_data():
+    df_2025, schedule_2026, roster_2026 = load_data_for_2026_season()
+    player_baselines = calculate_2025_player_baselines(df_2025)
+    def_rankings = calculate_2025_defense_rankings(df_2025)
+    return player_baselines, schedule_2026, roster_2026, def_rankings
 
-with st.spinner("Chargement des données NFL en cours..."):
-    players_df, defense_df = get_data()
+with st.spinner("Chargement du calendrier 2026 et des données 2025..."):
+    players_df, schedule_2026, roster_2026, def_df = get_dashboard_data()
 
-# Sidebar - Filtres
-st.sidebar.header("Filtres")
+# Sidebar
+st.sidebar.header("Paramètres 2026")
+
+# Selecteur de semaine 2026
+available_weeks = sorted(schedule_2026['week'].unique())
+selected_week = st.sidebar.selectbox("Semaine NFL 2026", options=available_weeks, index=0)
+
 selected_position = st.sidebar.multiselect("Position", options=["QB", "RB", "WR", "TE"], default=["WR", "RB"])
 stat_type = st.sidebar.selectbox("Pari ciblé", options=["Receiving Yards", "Rushing Yards", "Passing Yards"])
 
-latest_week = players_df['week'].max()
-df_latest = players_df[(players_df['week'] == latest_week) & (players_df['position'].isin(selected_position))].copy()
+# 1. Filtrer le calendrier 2026 pour la semaine sélectionnée
+week_schedule = schedule_2026[schedule_2026['week'] == selected_week]
 
-# Jointure avec les défenses
-df_merged = pd.merge(
-    df_latest,
-    defense_df,
-    left_on='opponent_team',
-    right_on='opponent_team',
-    how='left'
-)
+# Création des paires Matchup (Home vs Away) pour 2026
+home_teams = week_schedule[['home_team', 'away_team', 'location']].rename(columns={'home_team': 'team', 'away_team': 'opponent_team'})
+away_teams = week_schedule[['away_team', 'home_team', 'location']].rename(columns={'away_team': 'team', 'home_team': 'opponent_team'})
+matchups_2026 = pd.concat([home_teams, away_teams])
 
+# 2. Merger les joueurs actifs 2026 avec leur calendrier de la semaine
+df_merged = pd.merge(roster_2026, matchups_2026, left_on='team', right_on='team', how='inner')
+df_merged = df_merged[df_merged['position'].isin(selected_position)]
+
+# 3. Merger les baselines 2025 du joueur
+df_merged = pd.merge(df_merged, players_df, on='player_id', how='left')
+
+# 4. Merger le rang 2025 de la défense adverse 2026
+df_merged = pd.merge(df_merged, def_df, left_on='opponent_team', right_on='opponent_team', how='left')
+
+# Sélection des métriques à afficher
 if stat_type == "Receiving Yards":
-    metric_season = "receiving_yards"
-    metric_l3 = "receiving_yards_L3"
-    def_rank_col = "pass_def_rank"
+    m_avg, m_l3, def_rank = "rec_yds_avg", "rec_yds_l3", "pass_def_rank_2025"
 elif stat_type == "Rushing Yards":
-    metric_season = "rushing_yards"
-    metric_l3 = "rushing_yards_L3"
-    def_rank_col = "rush_def_rank"
+    m_avg, m_l3, def_rank = "rush_yds_avg", "rush_yds_l3", "rush_def_rank_2025"
 else:
-    metric_season = "passing_yards"
-    metric_l3 = "passing_yards_L3"
-    def_rank_col = "pass_def_rank"
+    m_avg, m_l3, def_rank = "pass_yds_avg", "pass_yds_l3", "pass_def_rank_2025"
 
-df_merged['Mismatch Alert'] = df_merged[def_rank_col].apply(
+# Détection de Mismatch
+df_merged['Mismatch Alert'] = df_merged[def_rank].apply(
     lambda x: "🔥 TOP MISMATCH" if x >= 24 else ("⚠️ Mismatch Moyen" if x >= 16 else "OK")
 )
 
-st.subheader(f"Analyses & Projections : {stat_type} (Semaine {latest_week})")
+st.subheader(f"Matchups Semaine {selected_week} (Saison 2026)")
 
-columns_to_show = [
-    'player_name', 'position', 'recent_team', 'opponent_team', 'status',
-    metric_season, metric_l3, def_rank_col, 'Mismatch Alert'
-]
+cols_display = ['player_name_x', 'position_x', 'team', 'opponent_team', m_avg, m_l3, def_rank, 'Mismatch Alert']
 
-# Ajustement au cas où 'recent_team' s'appelle 'team'
-if 'recent_team' not in df_merged.columns and 'team' in df_merged.columns:
-    df_merged['recent_team'] = df_merged['team']
-
-display_df = df_merged[columns_to_show].rename(columns={
-    'player_name': 'Joueur',
-    'position': 'Pos',
-    'recent_team': 'Équipe',
-    'opponent_team': 'Adversaire',
-    'status': 'Blessure',
-    metric_season: 'Moy. Saison',
-    metric_l3: 'Moy. Last 3',
-    def_rank_col: 'Rang Def Adverse (1=Top, 32=Pire)',
+res_df = df_merged[cols_display].rename(columns={
+    'player_name_x': 'Joueur',
+    'position_x': 'Pos',
+    'team': 'Équipe (2026)',
+    'opponent_team': 'Adversaire (2026)',
+    m_avg: 'Moyenne 2025',
+    m_l3: 'Derniers Matchs 2025',
+    def_rank: 'Rang Def Adverse (Stats 2025)',
     'Mismatch Alert': 'Indicateur'
-}).sort_values(by='Moy. Last 3', ascending=False)
+}).sort_values(by='Moyenne 2025', ascending=False)
 
-st.dataframe(display_df, use_container_width=True)
-
-with st.expander("📊 Voir le classement complet des défenses"):
-    st.dataframe(defense_df.sort_values(by='pass_def_rank', ascending=False), use_container_width=True)
+st.dataframe(res_df, use_container_width=True)
