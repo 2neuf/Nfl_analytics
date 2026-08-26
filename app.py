@@ -9,10 +9,11 @@ st.title("🏈 NFL Mismatch Finder — Dynamic Betting Dashboard")
 
 @st.cache_data(ttl=3600)
 def get_data():
-    raw_data = load_weekly_data(years=[2025])
+    raw_data = load_weekly_data(years=[2024])
     players_data = calculate_player_metrics(raw_data)
     defense_data = calculate_defense_rankings(raw_data)
     return players_data, defense_data
+
 
 with st.spinner("Chargement des données NFL en cours..."):
     players_df, defense_df = get_data()
