@@ -99,15 +99,20 @@ df_merged['Mismatch Alert'] = df_merged[def_rank].apply(
     lambda x: "🔥 TOP MISMATCH" if x >= 24 else ("⚠️ Mismatch Moyen" if x >= 16 else "OK") if pd.notnull(x) else "N/A"
 )
 
+# --- FORMATAGE ET NETTOYAGE DES DONNÉES ---
+res_df = df_merged.dropna(subset=[m_avg]).copy()
+
+# Arrondi à l'entier pour toutes les colonnes de yards et de rang
+for col in [m_avg, m_l3, def_avg, def_rank]:
+    res_df[col] = res_df[col].round(0).astype("Int64")
+
 # --- AFFICHAGE TABLEAU ---
 title_suffix = f" — {selected_game}" if selected_game != "Toutes les rencontres" else ""
 st.subheader(f"Matchups Semaine {selected_week}{title_suffix}")
 st.caption(f"🎯 **Critère sélectionné :** {selected_criterion}")
 
-name_col = 'player_name_x' if 'player_name_x' in df_merged.columns else 'player_name'
+name_col = 'player_name_x' if 'player_name_x' in res_df.columns else 'player_name'
 cols_display = [name_col, 'position', 'team', 'opponent_team', m_avg, m_l3, def_avg, def_rank, 'Mismatch Alert']
-
-res_df = df_merged.dropna(subset=[m_avg]).copy()
 
 res_df = res_df[cols_display].rename(columns={
     name_col: 'Joueur',
