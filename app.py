@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 from data_loader import load_weekly_data, calculate_player_metrics, calculate_defense_rankings
@@ -14,7 +13,6 @@ def get_data():
     defense_data = calculate_defense_rankings(raw_data)
     return players_data, defense_data
 
-
 with st.spinner("Chargement des données NFL en cours..."):
     players_df, defense_df = get_data()
 
@@ -23,11 +21,10 @@ st.sidebar.header("Filtres")
 selected_position = st.sidebar.multiselect("Position", options=["QB", "RB", "WR", "TE"], default=["WR", "RB"])
 stat_type = st.sidebar.selectbox("Pari ciblé", options=["Receiving Yards", "Rushing Yards", "Passing Yards"])
 
-# Filtrer les joueurs récents (dernière semaine disponible)
 latest_week = players_df['week'].max()
 df_latest = players_df[(players_df['week'] == latest_week) & (players_df['position'].isin(selected_position))].copy()
 
-# Jointure avec la défense adverse
+# Jointure avec les défenses
 df_merged = pd.merge(
     df_latest,
     defense_df,
@@ -36,7 +33,6 @@ df_merged = pd.merge(
     how='left'
 )
 
-# Alignement des colonnes selon le pari ciblé
 if stat_type == "Receiving Yards":
     metric_season = "receiving_yards"
     metric_l3 = "receiving_yards_L3"
@@ -50,21 +46,25 @@ else:
     metric_l3 = "passing_yards_L3"
     def_rank_col = "pass_def_rank"
 
-# Détection automatique des Mismatches (Pire défense = Rank > 24)
-df_merged['Mismatch Alert'] = df_merged[def_rank_col].apply(lambda x: "🔥 TOP MISMATCH" if x >= 24 else ("⚠️ Mismatch Moyen" if x >= 16 else "OK"))
+df_merged['Mismatch Alert'] = df_merged[def_rank_col].apply(
+    lambda x: "🔥 TOP MISMATCH" if x >= 24 else ("⚠️ Mismatch Moyen" if x >= 16 else "OK")
+)
 
-# Affichage du tableau principal
 st.subheader(f"Analyses & Projections : {stat_type} (Semaine {latest_week})")
 
 columns_to_show = [
-    'player_name', 'position', 'team', 'opponent_team', 'status',
+    'player_name', 'position', 'recent_team', 'opponent_team', 'status',
     metric_season, metric_l3, def_rank_col, 'Mismatch Alert'
 ]
+
+# Ajustement au cas où 'recent_team' s'appelle 'team'
+if 'recent_team' not in df_merged.columns and 'team' in df_merged.columns:
+    df_merged['recent_team'] = df_merged['team']
 
 display_df = df_merged[columns_to_show].rename(columns={
     'player_name': 'Joueur',
     'position': 'Pos',
-    'team': 'Équipe',
+    'recent_team': 'Équipe',
     'opponent_team': 'Adversaire',
     'status': 'Blessure',
     metric_season: 'Moy. Saison',
@@ -73,14 +73,7 @@ display_df = df_merged[columns_to_show].rename(columns={
     'Mismatch Alert': 'Indicateur'
 }).sort_values(by='Moy. Last 3', ascending=False)
 
-st.dataframe(
-    display_df,
-    use_container_width=True,
-    column_config={
-        "Indicateur": st.column_config.TextColumn("Indicateur Mismatch")
-    }
-)
+st.dataframe(display_df, use_container_width=True)
 
-# Section Classement Défense
 with st.expander("📊 Voir le classement complet des défenses"):
     st.dataframe(defense_df.sort_values(by='pass_def_rank', ascending=False), use_container_width=True)
