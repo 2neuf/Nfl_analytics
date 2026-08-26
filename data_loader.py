@@ -1,14 +1,18 @@
 import nfl_data_py as nfl
 import pandas as pd
 
-def load_weekly_data(years=[2025]):
+def load_weekly_data(years=[2024]):
     """Charge les statistiques hebdomadaires des joueurs et des équipes."""
-    # Stats hebdomadaires des joueurs
-    df_players = nfl.import_weekly_data(years)
-    
-    # Roster pour filtrer par position et statut de blessure
-    df_roster = nfl.import_rosters(years)
-    
+    try:
+        # Tente de charger l'année demandée
+        df_players = nfl.import_weekly_data(years)
+        df_roster = nfl.import_rosters(years)
+    except Exception:
+        # Secours sur l'année précédente si l'année demandée renvoie un 404
+        fallback_year = [years[0] - 1]
+        df_players = nfl.import_weekly_data(fallback_year)
+        df_roster = nfl.import_rosters(fallback_year)
+
     # Fusion des infos joueurs (position, nom complet)
     players_full = pd.merge(
         df_players,
@@ -18,6 +22,7 @@ def load_weekly_data(years=[2025]):
     )
     
     return players_full
+
 
 def calculate_player_metrics(df_players):
     """Calcule les moyennes saison et Last 3 (L3) Domicile/Extérieur."""
