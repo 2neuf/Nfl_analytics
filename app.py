@@ -27,19 +27,34 @@ st.sidebar.header("Paramètres 2026")
 available_weeks = sorted(schedule_2026['week'].unique())
 selected_week = st.sidebar.selectbox("Semaine NFL", options=available_weeks, index=0)
 
-selected_position = st.sidebar.multiselect(
-    "Positions", 
-    options=["WR", "RB", "QB", "TE"], 
-    default=["WR", "RB"]
+# Filtrage du calendrier pour la semaine choisie
+week_schedule = schedule_2026[schedule_2026['week'] == selected_week]
+
+# Filtre par rencontre (Matchup)
+game_options = ["Toutes les rencontres"] + [
+    f"{row['away_team']} @ {row['home_team']}" for _, row in week_schedule.iterrows()
+]
+selected_game = st.sidebar.selectbox("Rencontre", options=game_options)
+
+# MENU DÉROULANT UNIQUE DE CRITÈRES
+criterion_options = {
+    "Yards à la réception concédés aux WR": ("WR", "receiving"),
+    "Yards à la réception concédés aux TE": ("TE", "receiving"),
+    "Yards à la réception concédés aux RB": ("RB", "receiving"),
+    "Yards à la course concédés aux QB": ("QB", "rushing"),
+    "Yards à la course concédés aux RB": ("RB", "rushing"),
+    "Yards à la passe concédés aux QB": ("QB", "passing")
+}
+
+selected_criterion = st.sidebar.selectbox(
+    "Critère d'analyse",
+    options=list(criterion_options.keys())
 )
 
-stat_type = st.sidebar.selectbox(
-    "Pari / Statistique ciblée", 
-    options=["Receiving Yards", "Rushing Yards", "Passing Yards"]
-)
+# Extraction de la position et de la catégorie de stat
+target_position, stat_category = criterion_options[selected_criterion]
 
 # --- PRÉPARATION DES MATCHUPS 2026 ---
-week_schedule = schedule_2026[schedule_2026['week'] == selected_week]
 home_teams = week_schedule[['home_team', 'away_team']].rename(columns={'home_team': 'team', 'away_team': 'opponent_team'})
 away_teams = week_schedule[['away_team', 'home_team']].rename(columns={'away_team': 'team', 'home_team': 'opponent_team'})
 matchups_2026 = pd.concat([home_teams, away_teams])
@@ -47,18 +62,23 @@ matchups_2026 = pd.concat([home_teams, away_teams])
 # Merge Roster & Calendrier de la semaine
 df_merged = pd.merge(roster_2026, matchups_2026, on='team', how='inner')
 
-if selected_position:
-    df_merged = df_merged[df_merged['position'].isin(selected_position)]
+# Filtrage par rencontre si sélectionnée
+if selected_game != "Toutes les rencontres":
+    away, home = selected_game.split(" @ ")
+    df_merged = df_merged[df_merged['team'].isin([away, home])]
+
+# Filtrage strict sur la position unique du critère
+df_merged = df_merged[df_merged['position'] == target_position]
 
 # --- FUSION AVEC STATS JOUEURS ---
 merge_key = 'player_id' if ('player_id' in df_merged.columns and 'player_id' in players_df.columns) else 'player_name'
 df_merged = pd.merge(df_merged, players_df, on=merge_key, how='left')
 
-# Alignement du nom de colonne position après merge si création de suffixes
+# Alignment du nom de colonne position après merge
 if 'position_x' in df_merged.columns:
     df_merged['position'] = df_merged['position_x']
 
-# --- FUSION AVEC DÉFENSES (PAR OPONENT_TEAM ET POSITION) ---
+# --- FUSION AVEC DÉFENSES (PAR OPPONENT_TEAM ET POSITION) ---
 df_merged = pd.merge(
     df_merged, 
     def_df, 
@@ -66,26 +86,27 @@ df_merged = pd.merge(
     how='left'
 )
 
-# --- SÉLECTION DE LA STAT ET RANKING ---
-if stat_type == "Receiving Yards":
+# --- SÉLECTION DES COLONNES DE STATS ---
+if stat_category == "receiving":
     m_avg, m_l3, def_rank, def_avg = "rec_yds_avg", "rec_yds_l3", "rec_def_rank", "rec_yds_allowed_pg"
-elif stat_type == "Rushing Yards":
+elif stat_category == "rushing":
     m_avg, m_l3, def_rank, def_avg = "rush_yds_avg", "rush_yds_l3", "rush_def_rank", "rush_yds_allowed_pg"
-else:
+else:  # passing
     m_avg, m_l3, def_rank, def_avg = "pass_yds_avg", "pass_yds_l3", "pass_def_rank", "pass_yds_allowed_pg"
 
-# Indicateur de matchup (32 = défense concédant le plus de yards à la position)
+# Indicateur Mismatch (32 = Pire défense)
 df_merged['Mismatch Alert'] = df_merged[def_rank].apply(
     lambda x: "🔥 TOP MISMATCH" if x >= 24 else ("⚠️ Mismatch Moyen" if x >= 16 else "OK") if pd.notnull(x) else "N/A"
 )
 
 # --- AFFICHAGE TABLEAU ---
-st.subheader(f"Matchups Semaine {selected_week} — {stat_type}")
+title_suffix = f" — {selected_game}" if selected_game != "Toutes les rencontres" else ""
+st.subheader(f"Matchups Semaine {selected_week}{title_suffix}")
+st.caption(f"🎯 **Critère sélectionné :** {selected_criterion}")
 
 name_col = 'player_name_x' if 'player_name_x' in df_merged.columns else 'player_name'
 cols_display = [name_col, 'position', 'team', 'opponent_team', m_avg, m_l3, def_avg, def_rank, 'Mismatch Alert']
 
-# Nettoyage et formatage pour Streamlit
 res_df = df_merged.dropna(subset=[m_avg]).copy()
 
 res_df = res_df[cols_display].rename(columns={
@@ -95,8 +116,8 @@ res_df = res_df[cols_display].rename(columns={
     'opponent_team': 'Adversaire',
     m_avg: f'Moy. Joueur ({base_year})',
     m_l3: 'Derniers Matchs',
-    def_avg: f'Yards Concédés/M vs {stat_type}',
-    def_rank: f'Rang Déf. vs Pos ({base_year})',
+    def_avg: f'Yards Concédés/M aux {target_position}',
+    def_rank: f'Rang Déf. vs {target_position} ({base_year})',
     'Mismatch Alert': 'Indicateur'
 }).sort_values(by=f'Moy. Joueur ({base_year})', ascending=False)
 
