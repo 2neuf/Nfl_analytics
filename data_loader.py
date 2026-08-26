@@ -1,32 +1,30 @@
-import nfl_data_py as nfl
+import nflreadpy as nfl
 import pandas as pd
 
 def load_data_for_2026_season():
-    """Charge les stats de référence et le calendrier 2026 avec gestion des erreurs 404."""
-    
-    # 1. Chargement des stats (Tente 2025, bascule sur 2024 si 404)
+    """Charge les données 2025 via nflreadpy avec fallback sur 2024."""
     try:
-        df_players_base = nfl.import_weekly_data([2025])
+        # Chargement direct via nflreadpy
+        df_players_base = nfl.load_player_stats(seasons=[2025], summary_level="week")
         base_year = 2025
     except Exception:
-        df_players_base = nfl.import_weekly_data([2024])
+        # Fallback sur 2024 si les stats 2025 ne sont pas compilées
+        df_players_base = nfl.load_player_stats(seasons=[2024], summary_level="week")
         base_year = 2024
 
+    # Ajustement des colonnes de noms
     if 'player_name' not in df_players_base.columns and 'player_display_name' in df_players_base.columns:
         df_players_base['player_name'] = df_players_base['player_display_name']
 
-    # 2. Chargement du calendrier 2026 (Secours sur 2025/2024 si indisponible)
+    # Calendrier 2026
     try:
-        schedule_2026 = nfl.import_schedules([2026])
+        schedule_2026 = nfl.load_schedules(seasons=[2026])
     except Exception:
-        try:
-            schedule_2026 = nfl.import_schedules([2025])
-        except Exception:
-            schedule_2026 = nfl.import_schedules([2024])
+        schedule_2026 = nfl.load_schedules(seasons=[2025])
 
-    # 3. Effectifs / Rosters
+    # Rosters 2026 / 2025
     try:
-        roster_2026 = nfl.import_seasonal_rosters([2026])
+        roster_2026 = nfl.load_rosters(seasons=[2026])
     except Exception:
         roster_2026 = df_players_base[['player_id', 'player_name', 'position', 'recent_team']].drop_duplicates()
         roster_2026 = roster_2026.rename(columns={'recent_team': 'team'})
@@ -44,7 +42,6 @@ def calculate_2025_player_baselines(df_players_base):
         rec_yds_avg=('receiving_yards', 'mean'),
     ).reset_index()
 
-    # Calcul des 3 derniers matchs
     df_players_base['rec_l3'] = df_players_base.groupby('player_id')['receiving_yards'].transform(lambda x: x.tail(3).mean())
     df_players_base['rush_l3'] = df_players_base.groupby('player_id')['rushing_yards'].transform(lambda x: x.tail(3).mean())
     df_players_base['pass_l3'] = df_players_base.groupby('player_id')['passing_yards'].transform(lambda x: x.tail(3).mean())
@@ -58,7 +55,7 @@ def calculate_2025_player_baselines(df_players_base):
     return pd.merge(player_stats, l3_stats, on='player_id', how='left')
 
 def calculate_2025_defense_rankings(df_players_base):
-    """Classement des défenses (1 = Meilleure, 32 = Pire)."""
+    """Classement des défenses."""
     def_stats = df_players_base.groupby('opponent_team').agg(
         pass_yards_allowed_game=('passing_yards', lambda x: x.sum() / max(df_players_base['week'].nunique(), 1)),
         rush_yards_allowed_game=('rushing_yards', lambda x: x.sum() / max(df_players_base['week'].nunique(), 1))
