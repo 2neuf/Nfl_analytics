@@ -2,29 +2,25 @@ import nflreadpy as nfl
 import pandas as pd
 
 def load_data_for_2026_season():
-    """Charge les données 2025 via nflreadpy avec fallback sur 2024."""
+    """Charge les données via nflreadpy et les convertit en Pandas DataFrame."""
     try:
-        # Chargement direct via nflreadpy
-        df_players_base = nfl.load_player_stats(seasons=[2025], summary_level="week")
+        # Conversion explicite .to_pandas()
+        df_players_base = nfl.load_player_stats(seasons=[2025], summary_level="week").to_pandas()
         base_year = 2025
     except Exception:
-        # Fallback sur 2024 si les stats 2025 ne sont pas compilées
-        df_players_base = nfl.load_player_stats(seasons=[2024], summary_level="week")
+        df_players_base = nfl.load_player_stats(seasons=[2024], summary_level="week").to_pandas()
         base_year = 2024
 
-    # Ajustement des colonnes de noms
     if 'player_name' not in df_players_base.columns and 'player_display_name' in df_players_base.columns:
         df_players_base['player_name'] = df_players_base['player_display_name']
 
-    # Calendrier 2026
     try:
-        schedule_2026 = nfl.load_schedules(seasons=[2026])
+        schedule_2026 = nfl.load_schedules(seasons=[2026]).to_pandas()
     except Exception:
-        schedule_2026 = nfl.load_schedules(seasons=[2025])
+        schedule_2026 = nfl.load_schedules(seasons=[2025]).to_pandas()
 
-    # Rosters 2026 / 2025
     try:
-        roster_2026 = nfl.load_rosters(seasons=[2026])
+        roster_2026 = nfl.load_rosters(seasons=[2026]).to_pandas()
     except Exception:
         roster_2026 = df_players_base[['player_id', 'player_name', 'position', 'recent_team']].drop_duplicates()
         roster_2026 = roster_2026.rename(columns={'recent_team': 'team'})
