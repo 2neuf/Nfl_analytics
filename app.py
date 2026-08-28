@@ -74,7 +74,6 @@ with col_adv:
     )
 
 with col_limit:
-    # Filtre renommé "Limite par équipe" avec les nouvelles valeurs par défaut
     max_players_per_team = st.number_input(
         "Limite par équipe",
         min_value=1,
@@ -181,6 +180,10 @@ res_df = res_df.groupby('Équipe').head(max_players_per_team)
 
 # 3. Retri final pour garder l'ordre décroissant sur la vue d'ensemble
 res_df = res_df.sort_values(by=col_player_avg, ascending=False)
+
+# 4. RÉINITIALISATION DE L'INDEX (1, 2, 3...)
+res_df = res_df.reset_index(drop=True)
+res_df.index = res_df.index + 1
 
 # --- AFFICHAGE TABLEAU ---
 title_suffix = f" — {selected_game}" if selected_game != "Toutes les rencontres" else ""
