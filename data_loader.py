@@ -2,7 +2,7 @@ import nflreadpy as nfl
 import pandas as pd
 
 def load_data_for_2026_season():
-    """Charge les données via nflreadpy et garantit l'alignement des clés."""
+    """Charge les données via nflreadpy, filtre sur la saison régulière et normalise les clés."""
     try:
         df_players_base = nfl.load_player_stats(seasons=[2025], summary_level="week").to_pandas()
         base_year = 2025
@@ -12,10 +12,11 @@ def load_data_for_2026_season():
 
     # --- FILTRAGE SAISON RÉGULIÈRE UNIQUE ---
     if 'season_type' in df_players_base.columns:
-        df_players_base = df_players_base[df_players_base['season_type'] == 'REG']
+        df_players_base = df_players_base[df_players_base['season_type'] == 'REG'].copy()
     elif 'week' in df_players_base.columns:
-        df_players_base = df_players_base[df_players_base['week'] <= 18]
+        df_players_base = df_players_base[df_players_base['week'] <= 18].copy()
 
+    # Normalisation des noms de colonnes dans les stats joueurs
     if 'player_name' not in df_players_base.columns and 'player_display_name' in df_players_base.columns:
         df_players_base['player_name'] = df_players_base['player_display_name']
 
@@ -29,7 +30,7 @@ def load_data_for_2026_season():
     except Exception:
         roster_2026 = nfl.load_rosters(seasons=[2025]).to_pandas()
 
-    # Normalisation impérative des colonnes clés
+    # Normalisation des colonnes clés du roster
     if 'gsis_id' in roster_2026.columns:
         roster_2026['player_id'] = roster_2026['gsis_id']
     if 'team_abbr' in roster_2026.columns and 'team' not in roster_2026.columns:
@@ -41,7 +42,7 @@ def load_data_for_2026_season():
 
 
 def calculate_2025_player_baselines(df_players_base):
-    """Calcule les moyennes individuelles des joueurs sur la saison régulière uniquement."""
+    """Calcule les moyennes individuelles des joueurs (saison régulière et 3 derniers matchs)."""
     df_players_base = df_players_base.sort_values(by=['player_id', 'week'])
 
     player_stats = df_players_base.groupby(['player_id', 'player_name', 'position']).agg(
@@ -65,23 +66,33 @@ def calculate_2025_player_baselines(df_players_base):
 
 def calculate_2025_defense_by_position(df_players_base):
     """
-    Calcule les stats et rankings défensifs de saison régulière découpés par équipe ET par position adverse.
+    Calcule les stats et rankings défensifs de saison régulière découpés par équipe ET par position adverse,
+    en divisant par le nombre exact de matchs joués par la défense.
     """
-    nb_weeks = max(df_players_base['week'].nunique(), 1)
+    # 1. Nombre exact de matchs joués par chaque équipe défensive (prend en compte la week de bye)
+    games_per_team = (
+        df_players_base.groupby('opponent_team')['week']
+        .nunique()
+        .reset_index()
+        .rename(columns={'week': 'games_played'})
+    )
 
-    # Agrégation des yards concédés par défense et par position
+    # 2. Agrégation des yards concédés par défense et par position exacte du joueur
     def_pos_stats = df_players_base.groupby(['opponent_team', 'position']).agg(
         rec_yds_allowed=('receiving_yards', 'sum'),
         rush_yds_allowed=('rushing_yards', 'sum'),
         pass_yds_allowed=('passing_yards', 'sum')
     ).reset_index()
 
-    # Calcul des moyennes concédées par match
-    def_pos_stats['rec_yds_allowed_pg'] = def_pos_stats['rec_yds_allowed'] / nb_weeks
-    def_pos_stats['rush_yds_allowed_pg'] = def_pos_stats['rush_yds_allowed'] / nb_weeks
-    def_pos_stats['pass_yds_allowed_pg'] = def_pos_stats['pass_yds_allowed'] / nb_weeks
+    # 3. Fusion avec le nombre de matchs joués par l'équipe
+    def_pos_stats = pd.merge(def_pos_stats, games_per_team, on='opponent_team', how='left')
 
-    # Ranking au sein de chaque position (32 = défense qui concède le plus de yards)
+    # 4. Calcul des moyennes par match réels (Total yards concédés à la position / Nombre de matchs)
+    def_pos_stats['rec_yds_allowed_pg'] = def_pos_stats['rec_yds_allowed'] / def_pos_stats['games_played']
+    def_pos_stats['rush_yds_allowed_pg'] = def_pos_stats['rush_yds_allowed'] / def_pos_stats['games_played']
+    def_pos_stats['pass_yds_allowed_pg'] = def_pos_stats['pass_yds_allowed'] / def_pos_stats['games_played']
+
+    # 5. Rankings défensifs par position (1 = défense qui concède le moins, 32 = concède le plus)
     def_pos_stats['rec_def_rank'] = def_pos_stats.groupby('position')['rec_yds_allowed_pg'].rank(ascending=True)
     def_pos_stats['rush_def_rank'] = def_pos_stats.groupby('position')['rush_yds_allowed_pg'].rank(ascending=True)
     def_pos_stats['pass_def_rank'] = def_pos_stats.groupby('position')['pass_yds_allowed_pg'].rank(ascending=True)
