@@ -11,9 +11,9 @@ st.title("🏈 NFL Mismatch Finder 2026")
 
 @st.cache_data(ttl=3600)
 def get_dashboard_data():
-    df_base, schedule_2026, roster_2026, base_year = load_data_for_2026_season()
+    df_base, df_team_stats, schedule_2026, roster_2026, base_year = load_data_for_2026_season()
     player_baselines = calculate_2025_player_baselines(df_base)
-    def_pos_stats = calculate_2025_defense_by_position(df_base)
+    def_pos_stats = calculate_2025_defense_by_position(df_base, df_team_stats)
     return player_baselines, schedule_2026, roster_2026, def_pos_stats, base_year
 
 with st.spinner("Chargement des données NFL en cours..."):
