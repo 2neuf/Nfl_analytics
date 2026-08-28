@@ -38,12 +38,12 @@ selected_game = st.sidebar.selectbox("Rencontre", options=game_options)
 
 # MENU DÉROULANT UNIQUE DE CRITÈRES
 criterion_options = {
-    "Yards à la réception concédés aux WR": ("WR", "receiving"),
-    "Yards à la réception concédés aux TE": ("TE", "receiving"),
-    "Yards à la réception concédés aux RB": ("RB", "receiving"),
+    "Yards à la passe concédés aux QB": ("QB", "passing"),
     "Yards à la course concédés aux QB": ("QB", "rushing"),
     "Yards à la course concédés aux RB": ("RB", "rushing"),
-    "Yards à la passe concédés aux QB": ("QB", "passing")
+    "Yards à la réception concédés aux RB": ("RB", "receiving"),  
+    "Yards à la réception concédés aux WR": ("WR", "receiving"),
+    "Yards à la réception concédés aux TE": ("TE", "receiving")   
 }
 
 selected_criterion = st.sidebar.selectbox(
@@ -94,13 +94,28 @@ elif stat_category == "rushing":
 else:  # passing
     m_avg, m_l3, def_rank, def_avg = "pass_yds_avg", "pass_yds_l3", "pass_def_rank", "pass_yds_allowed_pg"
 
-# Indicateur Mismatch (32 = Pire défense)
-df_merged['Mismatch Alert'] = df_merged[def_rank].apply(
-    lambda x: "🔥 TOP MISMATCH" if x >= 24 else ("⚠️ Mismatch Moyen" if x >= 16 else "OK") if pd.notnull(x) else "N/A"
-)
+# --- NOUVELLE LOGIQUE D'INDICATEUR & NIVEAU D'AVANTAGE ---
+def get_advantage_indicator(rank):
+    if pd.isnull(rank):
+        return None
+    elif rank >= 27:
+        return "🔥 Gros avantage OFF"
+    elif 20 <= rank <= 26:
+        return "⚠️ Avantage OFF"
+    elif 7 <= rank <= 12:
+        return "🛡️ Avantage DEF"
+    elif 1 <= rank <= 6:
+        return "🔒 Gros avantage DEF"
+    else:
+        # Rangs 13 à 19 (Zone neutre) : Exclus
+        return None
 
-# --- FORMATAGE ET NETTOYAGE DES DONNÉES ---
-res_df = df_merged.dropna(subset=[m_avg]).copy()
+df_merged['Mismatch Alert'] = df_merged[def_rank].apply(get_advantage_indicator)
+
+# --- FORMATAGE ET FILTRAGE DU TABLEAU ---
+# 1. On garde uniquement les joueurs avec une moyenne ET ayant un indicateur (exclut les rangs 13 à 19)
+res_df = df_merged.dropna(subset=[m_avg, 'Mismatch Alert']).copy()
+
 
 # Arrondi à l'entier pour toutes les colonnes de yards et de rang
 for col in [m_avg, m_l3, def_avg, def_rank]:
