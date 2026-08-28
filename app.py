@@ -94,22 +94,36 @@ elif stat_category == "rushing":
 else:  # passing
     m_avg, m_l3, def_rank, def_avg = "pass_yds_avg", "pass_yds_l3", "pass_def_rank", "pass_yds_allowed_pg"
 
-# Indicateur Mismatch (32 = Pire défense)
-df_merged['Mismatch Alert'] = df_merged[def_rank].apply(
-    lambda x: "🔥 TOP MISMATCH" if x >= 24 else ("⚠️ Mismatch Moyen" if x >= 16 else "OK") if pd.notnull(x) else "N/A"
-)
+# --- NOUVELLE LOGIQUE D'INDICATEUR & NIVEAU D'AVANTAGE ---
+def get_advantage_indicator(rank):
+    if pd.isnull(rank):
+        return None
+    elif rank >= 27:
+        return "🔥 Gros avantage OFF"
+    elif 20 <= rank <= 26:
+        return "⚠️ Avantage OFF"
+    elif 7 <= rank <= 12:
+        return "🛡️ Avantage DEF"
+    elif 1 <= rank <= 6:
+        return "🔒 Gros avantage DEF"
+    else:
+        # Rangs 13 à 19 (Zone neutre) : Exclus
+        return None
 
-# --- FORMATAGE ET NETTOYAGE DES DONNÉES ---
-res_df = df_merged.dropna(subset=[m_avg]).copy()
+df_merged['Mismatch Alert'] = df_merged[def_rank].apply(get_advantage_indicator)
 
-# Arrondi à l'entier pour toutes les colonnes de yards et de rang
+# --- FORMATAGE ET FILTRAGE DU TABLEAU ---
+# 1. On garde uniquement les joueurs avec une moyenne ET ayant un indicateur (exclut les rangs 13 à 19)
+res_df = df_merged.dropna(subset=[m_avg, 'Mismatch Alert']).copy()
+
+# 2. Arrondi à l'entier
 for col in [m_avg, m_l3, def_avg, def_rank]:
     res_df[col] = res_df[col].round(0).astype("Int64")
 
 # --- AFFICHAGE TABLEAU ---
 title_suffix = f" — {selected_game}" if selected_game != "Toutes les rencontres" else ""
 st.subheader(f"Matchups Semaine {selected_week}{title_suffix}")
-st.caption(f"🎯 **Critère sélectionné :** {selected_criterion}")
+st.caption(f"🎯 **Critère sélectionné :** {selected_criterion} *(Les matchups neutres de rang 13 à 19 sont masqués)*")
 
 name_col = 'player_name_x' if 'player_name_x' in res_df.columns else 'player_name'
 cols_display = [name_col, 'position', 'team', 'opponent_team', m_avg, m_l3, def_avg, def_rank, 'Mismatch Alert']
