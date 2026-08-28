@@ -21,22 +21,28 @@ with st.spinner("Chargement des données NFL en cours..."):
 
 st.info(f"💡 Données de référence basées sur la saison **{base_year}**.")
 
-# --- SIDEBAR & FILTRES ---
-st.sidebar.header("Paramètres 2026")
+# --- FILTRES AU-DESSUS DU TABLEAU ---
+st.markdown("### ⚙️ Options de filtrage")
 
-available_weeks = sorted(schedule_2026['week'].unique())
-selected_week = st.sidebar.selectbox("Semaine NFL", options=available_weeks, index=0)
+# Ligne 1 : Semaine et Rencontre
+col1, col2 = st.columns(2)
+
+with col1:
+    available_weeks = sorted(schedule_2026['week'].unique())
+    selected_week = st.selectbox("Semaine NFL", options=available_weeks, index=0)
 
 # Filtrage du calendrier pour la semaine choisie
 week_schedule = schedule_2026[schedule_2026['week'] == selected_week]
 
-# Filtre par rencontre (Matchup)
-game_options = ["Toutes les rencontres"] + [
-    f"{row['away_team']} @ {row['home_team']}" for _, row in week_schedule.iterrows()
-]
-selected_game = st.sidebar.selectbox("Rencontre", options=game_options)
+with col2:
+    game_options = ["Toutes les rencontres"] + [
+        f"{row['away_team']} @ {row['home_team']}" for _, row in week_schedule.iterrows()
+    ]
+    selected_game = st.selectbox("Rencontre", options=game_options)
 
-# MENU DÉROULANT UNIQUE DE CRITÈRES
+# Ligne 2 : Critères d'analyse et Filtre d'avantage
+col3, col4 = st.columns(2)
+
 criterion_options = {
     "Yards à la passe concédés aux QB": ("QB", "passing"),
     "Yards à la course concédés aux QB": ("QB", "rushing"),
@@ -46,17 +52,21 @@ criterion_options = {
     "Yards à la réception concédés aux TE": ("TE", "receiving")   
 }
 
-selected_criterion = st.sidebar.selectbox(
-    "Critère d'analyse",
-    options=list(criterion_options.keys())
-)
+with col3:
+    selected_criterion = st.selectbox(
+        "Critère d'analyse",
+        options=list(criterion_options.keys())
+    )
 
-# FILTRE SUR LE NIVEAU D'AVANTAGE (NOUVEAU)
-filter_advantage = st.sidebar.radio(
-    "Filtre d'avantage",
-    options=["Tous les avantages", "🔥 Gros avantages uniquement (OFF & DEF)"],
-    index=0
-)
+with col4:
+    filter_advantage = st.radio(
+        "Niveau d'avantage",
+        options=["Tous les avantages", "🔥 Gros avantages uniquement (OFF & DEF)"],
+        index=0,
+        horizontal=True
+    )
+
+st.markdown("---")
 
 # Extraction de la position et de la catégorie de stat
 target_position, stat_category = criterion_options[selected_criterion]
