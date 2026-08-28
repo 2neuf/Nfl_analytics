@@ -2,3 +2,4 @@ streamlit
 pandas
 pyarrow<25
 nflreadpy
+nfl_data_py
