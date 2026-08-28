@@ -24,8 +24,7 @@ st.info(f"💡 Données de référence basées sur la saison **{base_year}**.")
 # --- BARRE DE FILTRES HORIZONTALE ---
 st.markdown("### ⚙️ Options de filtrage")
 
-# Ratios de colonnes incluant la limite de joueurs
-col_week, col_game, col_crit, col_adv, col_limit = st.columns([1, 2.2, 3, 2.2, 1.3])
+col_week, col_game, col_crit, col_adv, col_limit = st.columns([1, 2.2, 3, 2.2, 1.4])
 
 with col_week:
     available_weeks = sorted(schedule_2026['week'].unique())
@@ -58,14 +57,14 @@ with col_crit:
 # Extraction de la position et de la catégorie de stat
 target_position, stat_category = criterion_options[selected_criterion]
 
-# Valeur par défaut dynamique selon la position sélectionnée
-default_player_limits = {
-    "QB": 2,
-    "RB": 4,
-    "WR": 6,
-    "TE": 2
+# Valeur par défaut dynamique par équipe selon la position sélectionnée
+default_team_limits = {
+    "QB": 1,
+    "RB": 2,
+    "WR": 3,
+    "TE": 1
 }
-default_limit = default_player_limits.get(target_position, 5)
+default_limit = default_team_limits.get(target_position, 1)
 
 with col_adv:
     filter_advantage = st.selectbox(
@@ -75,14 +74,14 @@ with col_adv:
     )
 
 with col_limit:
-    # Utilisation d'une clé dynamique pour synchroniser la valeur par défaut au changement de critère
-    max_players = st.number_input(
-        "Limite joueurs",
+    # Filtre renommé "Limite par équipe" avec les nouvelles valeurs par défaut
+    max_players_per_team = st.number_input(
+        "Limite par équipe",
         min_value=1,
-        max_value=50,
+        max_value=10,
         value=default_limit,
         step=1,
-        key=f"limit_{target_position}"
+        key=f"limit_team_{target_position}"
     )
 
 st.markdown("---")
@@ -157,9 +156,7 @@ if filter_advantage == "🔥 Gros avantages uniquement (OFF & DEF)":
 for col in [m_avg, m_l3, def_avg, def_rank]:
     res_df[col] = res_df[col].round(0).astype("Int64")
 
-# --- TRI DÉCROISSANT ET APPLIQUE LA LIMITE DE JOUEURS ---
 col_player_avg = f'Moy. Joueur ({base_year})'
-
 name_col = 'player_name_x' if 'player_name_x' in res_df.columns else 'player_name'
 cols_display = [name_col, 'position', 'team', 'opponent_team', m_avg, m_l3, def_avg, def_rank, 'Mismatch Alert']
 
@@ -175,12 +172,19 @@ res_df = res_df[cols_display].rename(columns={
     'Mismatch Alert': 'Indicateur'
 })
 
-# Tri strict du plus grand au plus petit sur la moyenne du joueur, puis tronquage selon la limite
-res_df = res_df.sort_values(by=col_player_avg, ascending=False).head(max_players)
+# --- TRI ET FILTRAGE PAR ÉQUIPE ---
+# 1. Tri global par la moyenne du joueur (décroissant)
+res_df = res_df.sort_values(by=col_player_avg, ascending=False)
+
+# 2. Conservation des N meilleurs joueurs PAR ÉQUIPE
+res_df = res_df.groupby('Équipe').head(max_players_per_team)
+
+# 3. Retri final pour garder l'ordre décroissant sur la vue d'ensemble
+res_df = res_df.sort_values(by=col_player_avg, ascending=False)
 
 # --- AFFICHAGE TABLEAU ---
 title_suffix = f" — {selected_game}" if selected_game != "Toutes les rencontres" else ""
 st.subheader(f"Matchups Semaine {selected_week}{title_suffix}")
-st.caption(f"🎯 **Critère sélectionné :** {selected_criterion} | Top {len(res_df)} joueur(s) affiché(s)")
+st.caption(f"🎯 **Critère sélectionné :** {selected_criterion} | Max. {max_players_per_team} {target_position} par équipe")
 
 st.dataframe(res_df, use_container_width=True)
