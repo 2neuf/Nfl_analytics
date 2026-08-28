@@ -2,7 +2,6 @@ import nflreadpy as nfl
 import pandas as pd
 
 def load_data_for_2026_season():
-    """Charge les données officielles nflreadpy."""
     try:
         df_players_base = nfl.load_player_stats(seasons=[2025], summary_level="week").to_pandas()
         df_team_stats = nfl.load_team_stats(seasons=[2025]).to_pandas()
@@ -25,7 +24,7 @@ def load_data_for_2026_season():
     except Exception:
         roster_2026 = nfl.load_rosters(seasons=[2025]).to_pandas()
 
-    # Normalisation
+    # Normalisation des clés du roster
     if 'gsis_id' in roster_2026.columns:
         roster_2026['player_id'] = roster_2026['gsis_id']
     if 'team_abbr' in roster_2026.columns and 'team' not in roster_2026.columns:
@@ -33,11 +32,35 @@ def load_data_for_2026_season():
     if 'full_name' in roster_2026.columns and 'player_name' not in roster_2026.columns:
         roster_2026['player_name'] = roster_2026['full_name']
 
+    # Extraction du statut (ACT, IR, PUP, etc.)
+    if 'status' in roster_2026.columns:
+        roster_2026['statut'] = roster_2026['status'].fillna("ACT")
+    else:
+        roster_2026['statut'] = "ACT"
+
+    # Chargement du Depth Chart
+    try:
+        df_depth = nfl.load_depth_charts(seasons=[2026]).to_pandas()
+    except Exception:
+        df_depth = nfl.load_depth_charts(seasons=[2025]).to_pandas()
+
+    # Nettoyage et récupération de la profondeur (depth_team : 1 = RB1, 2 = RB2...)
+    if 'gsis_id' in df_depth.columns:
+        df_depth['player_id'] = df_depth['gsis_id']
+    
+    # Conservation du depth_team le plus récent par joueur
+    df_depth_clean = df_depth.sort_values(by='week').groupby(['player_id', 'position']).agg(
+        depth_team=('depth_team', 'last')
+    ).reset_index()
+
+    # Merge du Depth Chart dans le Roster
+    roster_2026 = pd.merge(roster_2026, df_depth_clean, on=['player_id', 'position'], how='left')
+    roster_2026['depth_team'] = roster_2026['depth_team'].fillna(99).astype(int)
+
     return df_players_base, df_team_stats, schedule_2026, roster_2026, base_year
 
 
 def calculate_2025_player_baselines(df_players_base):
-    """Calcule les moyennes individuelles des joueurs (saison régulière)."""
     df_reg = df_players_base[df_players_base['week'] <= 18].copy() if 'week' in df_players_base.columns else df_players_base.copy()
     df_reg = df_reg.sort_values(by=['player_id', 'week'])
 
@@ -61,17 +84,11 @@ def calculate_2025_player_baselines(df_players_base):
 
 
 def calculate_2025_defense_by_position(df_players_base, df_team_stats):
-    """
-    Combine les vrais totaux d'équipe officiels (type Pro Football Reference) 
-    pour le général QB et le découpage par position pour les cibles.
-    """
     df_reg = df_players_base[df_players_base['week'] <= 18].copy()
 
-    # Nombre réel de matchs joués
     games_per_team = df_reg.groupby('opponent_team')['week'].nunique().reset_index()
     games_per_team.rename(columns={'week': 'games_played'}, inplace=True)
 
-    # Agrégation des stats par position
     def_pos_stats = df_reg.groupby(['opponent_team', 'position']).agg(
         rec_yds_allowed=('receiving_yards', 'sum'),
         rush_yds_allowed=('rushing_yards', 'sum'),
@@ -84,20 +101,15 @@ def calculate_2025_defense_by_position(df_players_base, df_team_stats):
     def_pos_stats['rush_yds_allowed_pg'] = def_pos_stats['rush_yds_allowed'] / def_pos_stats['games_played']
     def_pos_stats['pass_yds_allowed_pg'] = def_pos_stats['pass_yds_allowed'] / def_pos_stats['games_played']
 
-    # Si données globales d'équipe disponibles (Net Passing Yards officiels)
     if df_team_stats is not None and 'passing_yards_against' in df_team_stats.columns:
         team_def = df_team_stats[['team', 'passing_yards_against', 'rushing_yards_against', 'games']].copy()
         team_def['official_pass_pg'] = team_def['passing_yards_against'] / team_def['games']
         team_def['official_rush_pg'] = team_def['rushing_yards_against'] / team_def['games']
         
-        # Remplacement des valeurs QB par les chiffres officiels d'équipe
         def_pos_stats = pd.merge(def_pos_stats, team_def, left_on='opponent_team', right_on='team', how='left')
-        
-        # Mise à jour pour les QB avec les Net Yards officiels
         qb_mask = def_pos_stats['position'] == 'QB'
         def_pos_stats.loc[qb_mask, 'pass_yds_allowed_pg'] = def_pos_stats.loc[qb_mask, 'official_pass_pg']
 
-    # Rankings
     def_pos_stats['rec_def_rank'] = def_pos_stats.groupby('position')['rec_yds_allowed_pg'].rank(ascending=True)
     def_pos_stats['rush_def_rank'] = def_pos_stats.groupby('position')['rush_yds_allowed_pg'].rank(ascending=True)
     def_pos_stats['pass_def_rank'] = def_pos_stats.groupby('position')['pass_yds_allowed_pg'].rank(ascending=True)
