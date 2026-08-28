@@ -117,13 +117,13 @@ df_merged = pd.merge(
     how='left'
 )
 
-# --- SÉLECTION DES COLONNES DE STATS ---
+# --- SÉLECTION DES COLONNES DE STATS (INCLUANT MOYENNE AJUSTÉE) ---
 if stat_category == "receiving":
-    m_avg, m_l3, def_rank, def_avg = "rec_yds_avg", "rec_yds_l3", "rec_def_rank", "rec_yds_allowed_pg"
+    m_avg, m_adj, m_l3, def_rank, def_avg = "rec_yds_avg", "rec_yds_adj", "rec_yds_l3", "rec_def_rank", "rec_yds_allowed_pg"
 elif stat_category == "rushing":
-    m_avg, m_l3, def_rank, def_avg = "rush_yds_avg", "rush_yds_l3", "rush_def_rank", "rush_yds_allowed_pg"
+    m_avg, m_adj, m_l3, def_rank, def_avg = "rush_yds_avg", "rush_yds_adj", "rush_yds_l3", "rush_def_rank", "rush_yds_allowed_pg"
 else:  # passing
-    m_avg, m_l3, def_rank, def_avg = "pass_yds_avg", "pass_yds_l3", "pass_def_rank", "pass_yds_allowed_pg"
+    m_avg, m_adj, m_l3, def_rank, def_avg = "pass_yds_avg", "pass_yds_adj", "pass_yds_l3", "pass_def_rank", "pass_yds_allowed_pg"
 
 # --- LOGIQUE D'INDICATEUR & NIVEAU D'AVANTAGE ---
 def get_advantage_indicator(rank):
@@ -144,20 +144,20 @@ def get_advantage_indicator(rank):
 df_merged['Mismatch Alert'] = df_merged[def_rank].apply(get_advantage_indicator)
 
 # --- FORMATAGE ET FILTRAGE DU TABLEAU ---
-# 1. Conservation uniquement des joueurs avec une moyenne ET ayant un indicateur (exclut les rangs 13 à 19)
 res_df = df_merged.dropna(subset=[m_avg, 'Mismatch Alert']).copy()
 
-# 2. Application du filtre "Gros avantages uniquement" si sélectionné
 if filter_advantage == "🔥 Gros avantages uniquement (OFF & DEF)":
     res_df = res_df[res_df['Mismatch Alert'].isin(["🔥 Gros avantage OFF", "🔒 Gros avantage DEF"])]
 
-# Arrondi à l'entier pour toutes les colonnes de yards et de rang
-for col in [m_avg, m_l3, def_avg, def_rank]:
+# Arrondi à l'entier pour toutes les colonnes numériques
+for col in [m_avg, m_adj, m_l3, def_avg, def_rank]:
     res_df[col] = res_df[col].round(0).astype("Int64")
 
-col_player_avg = f'Moy. Joueur ({base_year})'
+col_player_avg = f'Moy. Brut ({base_year})'
+col_player_adj = f'Moy. Ajustée ({base_year})'
+
 name_col = 'player_name_x' if 'player_name_x' in res_df.columns else 'player_name'
-cols_display = [name_col, 'position', 'team', 'opponent_team', m_avg, m_l3, def_avg, def_rank, 'Mismatch Alert']
+cols_display = [name_col, 'position', 'team', 'opponent_team', m_avg, m_adj, m_l3, def_avg, def_rank, 'Mismatch Alert']
 
 res_df = res_df[cols_display].rename(columns={
     name_col: 'Joueur',
@@ -165,6 +165,7 @@ res_df = res_df[cols_display].rename(columns={
     'team': 'Équipe',
     'opponent_team': 'Adversaire',
     m_avg: col_player_avg,
+    m_adj: col_player_adj,
     m_l3: 'Derniers Matchs',
     def_avg: f'Yards Concédés/M aux {target_position}',
     def_rank: f'Rang Déf. vs {target_position} ({base_year})',
@@ -172,16 +173,16 @@ res_df = res_df[cols_display].rename(columns={
 })
 
 # --- TRI ET FILTRAGE PAR ÉQUIPE ---
-# 1. Tri global par la moyenne du joueur (décroissant)
+# 1. Tri par la moyenne brute (décroissant)
 res_df = res_df.sort_values(by=col_player_avg, ascending=False)
 
-# 2. Conservation des N meilleurs joueurs PAR ÉQUIPE
+# 2. Limitation par équipe
 res_df = res_df.groupby('Équipe').head(max_players_per_team)
 
-# 3. Retri final pour garder l'ordre décroissant sur la vue d'ensemble
+# 3. Retri final sur la moyenne brute
 res_df = res_df.sort_values(by=col_player_avg, ascending=False)
 
-# 4. RÉINITIALISATION DE L'INDEX (1, 2, 3...)
+# 4. Réinitialisation propre de l'index (1, 2, 3...)
 res_df = res_df.reset_index(drop=True)
 res_df.index = res_df.index + 1
 
