@@ -27,23 +27,20 @@ st.sidebar.header("Paramètres 2026")
 available_weeks = sorted(schedule_2026['week'].unique())
 selected_week = st.sidebar.selectbox("Semaine NFL", options=available_weeks, index=0)
 
-# Filtrage du calendrier pour la semaine choisie
 week_schedule = schedule_2026[schedule_2026['week'] == selected_week]
 
-# Filtre par rencontre (Matchup)
 game_options = ["Toutes les rencontres"] + [
     f"{row['away_team']} @ {row['home_team']}" for _, row in week_schedule.iterrows()
 ]
 selected_game = st.sidebar.selectbox("Rencontre", options=game_options)
 
-# MENU DÉROULANT UNIQUE DE CRITÈRES
 criterion_options = {
-    "Yards à la passe concédés aux QB": ("QB", "passing"),
+    "Yards à la réception concédés aux WR": ("WR", "receiving"),
+    "Yards à la réception concédés aux TE": ("TE", "receiving"),
+    "Yards à la réception concédés aux RB": ("RB", "receiving"),
     "Yards à la course concédés aux QB": ("QB", "rushing"),
     "Yards à la course concédés aux RB": ("RB", "rushing"),
-    "Yards à la réception concédés aux RB": ("RB", "receiving"),  
-    "Yards à la réception concédés aux WR": ("WR", "receiving"),
-    "Yards à la réception concédés aux TE": ("TE", "receiving")   
+    "Yards à la passe concédés aux QB": ("QB", "passing")
 }
 
 selected_criterion = st.sidebar.selectbox(
@@ -51,34 +48,27 @@ selected_criterion = st.sidebar.selectbox(
     options=list(criterion_options.keys())
 )
 
-# Extraction de la position et de la catégorie de stat
 target_position, stat_category = criterion_options[selected_criterion]
 
-# --- PRÉPARATION DES MATCHUPS 2026 ---
+# --- PRÉPARATION DES MATCHUPS ---
 home_teams = week_schedule[['home_team', 'away_team']].rename(columns={'home_team': 'team', 'away_team': 'opponent_team'})
 away_teams = week_schedule[['away_team', 'home_team']].rename(columns={'away_team': 'team', 'home_team': 'opponent_team'})
 matchups_2026 = pd.concat([home_teams, away_teams])
 
-# Merge Roster & Calendrier de la semaine
 df_merged = pd.merge(roster_2026, matchups_2026, on='team', how='inner')
 
-# Filtrage par rencontre si sélectionnée
 if selected_game != "Toutes les rencontres":
     away, home = selected_game.split(" @ ")
     df_merged = df_merged[df_merged['team'].isin([away, home])]
 
-# Filtrage strict sur la position unique du critère
 df_merged = df_merged[df_merged['position'] == target_position]
 
-# --- FUSION AVEC STATS JOUEURS ---
 merge_key = 'player_id' if ('player_id' in df_merged.columns and 'player_id' in players_df.columns) else 'player_name'
 df_merged = pd.merge(df_merged, players_df, on=merge_key, how='left')
 
-# Alignment du nom de colonne position après merge
 if 'position_x' in df_merged.columns:
     df_merged['position'] = df_merged['position_x']
 
-# --- FUSION AVEC DÉFENSES (PAR OPPONENT_TEAM ET POSITION) ---
 df_merged = pd.merge(
     df_merged, 
     def_df, 
@@ -86,15 +76,13 @@ df_merged = pd.merge(
     how='left'
 )
 
-# --- SÉLECTION DES COLONNES DE STATS ---
 if stat_category == "receiving":
     m_avg, m_l3, def_rank, def_avg = "rec_yds_avg", "rec_yds_l3", "rec_def_rank", "rec_yds_allowed_pg"
 elif stat_category == "rushing":
     m_avg, m_l3, def_rank, def_avg = "rush_yds_avg", "rush_yds_l3", "rush_def_rank", "rush_yds_allowed_pg"
-else:  # passing
+else:
     m_avg, m_l3, def_rank, def_avg = "pass_yds_avg", "pass_yds_l3", "pass_def_rank", "pass_yds_allowed_pg"
 
-# --- NOUVELLE LOGIQUE D'INDICATEUR & NIVEAU D'AVANTAGE ---
 def get_advantage_indicator(rank):
     if pd.isnull(rank):
         return None
@@ -107,30 +95,35 @@ def get_advantage_indicator(rank):
     elif 1 <= rank <= 6:
         return "🔒 Gros avantage DEF"
     else:
-        # Rangs 13 à 19 (Zone neutre) : Exclus
         return None
 
 df_merged['Mismatch Alert'] = df_merged[def_rank].apply(get_advantage_indicator)
 
-# --- FORMATAGE ET FILTRAGE DU TABLEAU ---
-# 1. On garde uniquement les joueurs avec une moyenne ET ayant un indicateur (exclut les rangs 13 à 19)
+# Création du libellé Depth Chart (ex: WR1, RB2)
+df_merged['Chart'] = df_merged.apply(
+    lambda r: f"{r['position']}{r['depth_team']}" if r['depth_team'] < 99 else f"{r['position']} (N/A)", 
+    axis=1
+)
+
+# Nettoyage
 res_df = df_merged.dropna(subset=[m_avg, 'Mismatch Alert']).copy()
 
-# 2. Arrondi à l'entier
 for col in [m_avg, m_l3, def_avg, def_rank]:
     res_df[col] = res_df[col].round(0).astype("Int64")
 
 # --- AFFICHAGE TABLEAU ---
 title_suffix = f" — {selected_game}" if selected_game != "Toutes les rencontres" else ""
 st.subheader(f"Matchups Semaine {selected_week}{title_suffix}")
-st.caption(f"🎯 **Critère sélectionné :** {selected_criterion} *(Les matchups neutres de rang 13 à 19 sont masqués)*")
+st.caption(f"🎯 **Critère sélectionné :** {selected_criterion} *(Matchups neutres 13 à 19 masqués)*")
 
 name_col = 'player_name_x' if 'player_name_x' in res_df.columns else 'player_name'
-cols_display = [name_col, 'position', 'team', 'opponent_team', m_avg, m_l3, def_avg, def_rank, 'Mismatch Alert']
+cols_display = [name_col, 'position', 'Chart', 'statut', 'team', 'opponent_team', m_avg, m_l3, def_avg, def_rank, 'Mismatch Alert', 'depth_team']
 
 res_df = res_df[cols_display].rename(columns={
     name_col: 'Joueur',
     'position': 'Pos',
+    'Chart': 'Rôle',
+    'statut': 'Statut',
     'team': 'Équipe',
     'opponent_team': 'Adversaire',
     m_avg: f'Moy. Joueur ({base_year})',
@@ -138,6 +131,9 @@ res_df = res_df[cols_display].rename(columns={
     def_avg: f'Yards Concédés/M aux {target_position}',
     def_rank: f'Rang Déf. vs {target_position} ({base_year})',
     'Mismatch Alert': 'Indicateur'
-}).sort_values(by=f'Moy. Joueur ({base_year})', ascending=False)
+})
+
+# TRI PAR ORDRE DE DEPTH CHART (RB1 -> RB2 -> RB3)
+res_df = res_df.sort_values(by='depth_team', ascending=True).drop(columns=['depth_team'])
 
 st.dataframe(res_df, use_container_width=True)
