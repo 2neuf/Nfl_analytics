@@ -48,24 +48,35 @@ def load_data_for_2026_season():
     if 'gsis_id' in df_depth.columns:
         df_depth['player_id'] = df_depth['gsis_id']
     
-    # 1. Normalisation de la colonne position ('pos' -> 'position')
-    if 'position' not in df_depth.columns and 'pos' in df_depth.columns:
-        df_depth['position'] = df_depth['pos']
-    
-    # 2. Gestion dynamique des colonnes de tri et de groupe
-    sort_col = 'week' if 'week' in df_depth.columns else ('dt' if 'dt' in df_depth.columns else df_depth.columns[0])
-    
-    # 3. Groupby sécurisé
-    groupby_cols = ['player_id']
-    if 'position' in df_depth.columns:
-        groupby_cols.append('position')
-    
-    df_depth_clean = (
-        df_depth.sort_values(by=sort_col)
-        .groupby(groupby_cols)
-        .agg(depth_team=('depth_team', 'last'))
-        .reset_index()
-    )
+    # 1. Normalisation de la colonne 'player_id' (si nécessaire)
+if 'player_id' not in df_depth.columns and 'gsis_id' in df_depth.columns:
+    df_depth['player_id'] = df_depth['gsis_id']
+
+# 2. Normalisation de la colonne d'équipe (club_code / team -> depth_team)
+if 'depth_team' not in df_depth.columns:
+    if 'club_code' in df_depth.columns:
+        df_depth['depth_team'] = df_depth['club_code']
+    elif 'team' in df_depth.columns:
+        df_depth['depth_team'] = df_depth['team']
+
+# 3. Normalisation de la colonne de position ('pos' -> 'position')
+if 'position' not in df_depth.columns and 'pos' in df_depth.columns:
+    df_depth['position'] = df_depth['pos']
+
+# 4. Identification de la colonne de tri
+sort_col = 'week' if 'week' in df_depth.columns else ('dt' if 'dt' in df_depth.columns else df_depth.columns[0])
+
+# 5. Groupby et agrégation sécurisés
+groupby_cols = ['player_id']
+if 'position' in df_depth.columns:
+    groupby_cols.append('position')
+
+df_depth_clean = (
+    df_depth.sort_values(by=sort_col)
+    .groupby(groupby_cols)
+    .agg(depth_team=('depth_team', 'last'))
+    .reset_index()
+)
 
     # Merge du Depth Chart dans le Roster
     roster_2026 = pd.merge(roster_2026, df_depth_clean, on=['player_id', 'position'], how='left')
