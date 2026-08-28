@@ -21,27 +21,24 @@ with st.spinner("Chargement des données NFL en cours..."):
 
 st.info(f"💡 Données de référence basées sur la saison **{base_year}**.")
 
-# --- FILTRES AU-DESSUS DU TABLEAU ---
+# --- BARRE DE FILTRES HORIZONTALE UNIQUE ---
 st.markdown("### ⚙️ Options de filtrage")
 
-# Ligne 1 : Semaine et Rencontre
-col1, col2 = st.columns(2)
+# Ratios ajustés : Semaine (compact), Rencontre (large), Critère (large), Filtre (moyen)
+col_week, col_game, col_crit, col_adv = st.columns([1, 2.5, 3, 2.5])
 
-with col1:
+with col_week:
     available_weeks = sorted(schedule_2026['week'].unique())
     selected_week = st.selectbox("Semaine NFL", options=available_weeks, index=0)
 
 # Filtrage du calendrier pour la semaine choisie
 week_schedule = schedule_2026[schedule_2026['week'] == selected_week]
 
-with col2:
+with col_game:
     game_options = ["Toutes les rencontres"] + [
         f"{row['away_team']} @ {row['home_team']}" for _, row in week_schedule.iterrows()
     ]
     selected_game = st.selectbox("Rencontre", options=game_options)
-
-# Ligne 2 : Critères d'analyse et Filtre d'avantage
-col3, col4 = st.columns(2)
 
 criterion_options = {
     "Yards à la passe concédés aux QB": ("QB", "passing"),
@@ -52,18 +49,17 @@ criterion_options = {
     "Yards à la réception concédés aux TE": ("TE", "receiving")   
 }
 
-with col3:
+with col_crit:
     selected_criterion = st.selectbox(
         "Critère d'analyse",
         options=list(criterion_options.keys())
     )
 
-with col4:
-    filter_advantage = st.radio(
+with col_adv:
+    filter_advantage = st.selectbox(
         "Niveau d'avantage",
         options=["Tous les avantages", "🔥 Gros avantages uniquement (OFF & DEF)"],
-        index=0,
-        horizontal=True
+        index=0
     )
 
 st.markdown("---")
