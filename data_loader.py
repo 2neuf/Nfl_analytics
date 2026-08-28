@@ -10,6 +10,12 @@ def load_data_for_2026_season():
         df_players_base = nfl.load_player_stats(seasons=[2024], summary_level="week").to_pandas()
         base_year = 2024
 
+    # --- FILTRAGE SAISON RÉGULIÈRE UNIQUE ---
+    if 'season_type' in df_players_base.columns:
+        df_players_base = df_players_base[df_players_base['season_type'] == 'REG']
+    elif 'week' in df_players_base.columns:
+        df_players_base = df_players_base[df_players_base['week'] <= 18]
+
     if 'player_name' not in df_players_base.columns and 'player_display_name' in df_players_base.columns:
         df_players_base['player_name'] = df_players_base['player_display_name']
 
@@ -35,7 +41,7 @@ def load_data_for_2026_season():
 
 
 def calculate_2025_player_baselines(df_players_base):
-    """Calcule les moyennes individuelles des joueurs (saison complète et 3 derniers matchs)."""
+    """Calcule les moyennes individuelles des joueurs sur la saison régulière uniquement."""
     df_players_base = df_players_base.sort_values(by=['player_id', 'week'])
 
     player_stats = df_players_base.groupby(['player_id', 'player_name', 'position']).agg(
@@ -59,7 +65,7 @@ def calculate_2025_player_baselines(df_players_base):
 
 def calculate_2025_defense_by_position(df_players_base):
     """
-    Calcule les stats et rankings défensifs 2025 découpés par équipe ET par position adverse.
+    Calcule les stats et rankings défensifs de saison régulière découpés par équipe ET par position adverse.
     """
     nb_weeks = max(df_players_base['week'].nunique(), 1)
 
