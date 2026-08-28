@@ -10,49 +10,65 @@ st.set_page_config(page_title="NFL Analytics 2026", layout="wide")
 
 @st.cache_data(ttl=3600)
 def get_dashboard_data():
-    # Dépaquetage strict des 5 valeurs renvoyées par data_loader
     df_base, df_team_stats, schedule_2026, roster_2026, base_year = load_data_for_2026_season()
     player_baselines = calculate_2025_player_baselines(df_base)
     def_pos_stats = calculate_2025_defense_by_position(df_base, df_team_stats)
     return player_baselines, schedule_2026, roster_2026, def_pos_stats, base_year
-
 
 with st.spinner("Chargement des données NFL en cours..."):
     players_df, schedule_2026, roster_2026, def_df, base_year = get_dashboard_data()
 
 st.info(f"💡 Données de référence basées sur la saison **{base_year}**")
 
-# --- Interface / Filtres ---
 st.title("🏈 NFL Analytics & Projections")
 
-stat_type = st.selectbox("Sélectionner la statistique", ["Pass Yds", "Rush Yds", "Rec Yds"])
+# --- Barre latérale de filtres ---
+st.sidebar.header("Filtres")
 
-# Cartographie dynamique des colonnes selon le filtre
-stat_prefix = stat_type.lower().replace(" ", "_")
-m_avg = f"{stat_prefix}_avg" if f"{stat_prefix}_avg" in players_df.columns else "passing_yards"
-m_adj = f"{stat_prefix}_adj"
-m_l3 = f"{stat_prefix}_l3"
-def_avg = "def_avg"
-def_rank = "def_rank"
+positions_dispo = ["ALL", "QB", "RB", "WR", "TE"]
+pos_filter = st.sidebar.selectbox("Position", positions_dispo)
 
-# Simulation de res_df (à adapter selon ta logique d'agrégation)
-res_df = players_df.copy() if not players_df.empty else pd.DataFrame()
+stat_type = st.sidebar.selectbox("Statistique ciblée", ["Pass Yds", "Rush Yds", "Rec Yds"])
 
-# --- Affichage & Formatting sécurisé ---
-if res_df is not None and not res_df.empty:
-    
-    # Sécurisation : Arrondi exécuté uniquement sur les colonnes réellement présentes
-    cols_to_round = [m_avg, m_adj, m_l3, def_avg, def_rank]
-    for col in cols_to_round:
+# Mapping des colonnes selon la stat sélectionnée
+stat_map = {
+    "Pass Yds": ("pass_yds_avg", "pass_yds_adj", "pass_yds_l3", "pass_yds_def_avg", "pass_yds_def_rank"),
+    "Rush Yds": ("rush_yds_avg", "rush_yds_adj", "rush_yds_l3", "rush_yds_def_avg", "rush_yds_def_rank"),
+    "Rec Yds":  ("rec_yds_avg",  "rec_yds_adj",  "rec_yds_l3",  "rec_yds_def_avg",  "rec_yds_def_rank")
+}
+
+m_avg, m_adj, m_l3, def_avg, def_rank = stat_map.get(stat_type, stat_map["Pass Yds"])
+
+# --- Filtrage des joueurs ---
+res_df = players_df.copy() if players_df is not None and not players_df.empty else pd.DataFrame()
+
+if not res_df.empty:
+    if pos_filter != "ALL" and "position" in res_df.columns:
+        res_df = res_df[res_df["position"] == pos_filter]
+
+    # --- Matchups et croisement défense ---
+    if def_df is not None and not def_df.empty and "opponent" in res_df.columns:
+        res_df = res_df.merge(def_df, on=["opponent", "position"], how="left")
+
+    # --- CORRECTION DU CRASH (Ligne 153-154) ---
+    # On vérifie si chaque colonne existe bien avant de la convertir/arrondir
+    for col in [m_avg, m_adj, m_l3, def_avg, def_rank]:
         if col in res_df.columns:
-            res_df[col] = pd.to_numeric(res_df[col], errors='coerce').round(0).astype("Int64")
+            res_df[col] = pd.to_numeric(res_df[col], errors="coerce").round(0).astype("Int64")
 
-    col_player_avg = f'Moy. Brut ({base_year})'
-    col_player_adj = f'Moy. Ajustée ({base_year})'
+    # Renommage des colonnes pour l'affichage final
+    rename_dict = {}
+    if m_avg in res_df.columns: rename_dict[m_avg] = f"Moy. Brut ({base_year})"
+    if m_adj in res_df.columns: rename_dict[m_adj] = f"Moy. Ajustée ({base_year})"
+    if m_l3 in res_df.columns: rename_dict[m_l3] = "Moy. 3 Derniers Matchs"
+    if def_avg in res_df.columns: rename_dict[def_avg] = "Déf. Concéder"
+    if def_rank in res_df.columns: rename_dict[def_rank] = "Rang Défense"
 
-    st.subheader(f"Analyses et projections - {stat_type}")
-    
-    # Remplacement de use_container_width par width="stretch" (Norme Streamlit 2026)
-    st.dataframe(res_df, width="stretch")
+    display_df = res_df.rename(columns=rename_dict)
+
+    # Affichage du tableau principal
+    st.subheader(f"Analyses {stat_type} - Position : {pos_filter}")
+    st.dataframe(display_df, use_container_width=True)
+
 else:
     st.warning("Aucune donnée disponible à afficher.")
