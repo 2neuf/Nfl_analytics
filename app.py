@@ -38,12 +38,12 @@ selected_game = st.sidebar.selectbox("Rencontre", options=game_options)
 
 # MENU DÉROULANT UNIQUE DE CRITÈRES
 criterion_options = {
-    "Yards à la réception concédés aux WR": ("WR", "receiving"),
-    "Yards à la réception concédés aux TE": ("TE", "receiving"),
-    "Yards à la réception concédés aux RB": ("RB", "receiving"),
+    "Yards à la passe concédés aux QB": ("QB", "passing"),
     "Yards à la course concédés aux QB": ("QB", "rushing"),
     "Yards à la course concédés aux RB": ("RB", "rushing"),
-    "Yards à la passe concédés aux QB": ("QB", "passing")
+    "Yards à la réception concédés aux RB": ("RB", "receiving"),  
+    "Yards à la réception concédés aux WR": ("WR", "receiving"),
+    "Yards à la réception concédés aux TE": ("TE", "receiving")   
 }
 
 selected_criterion = st.sidebar.selectbox(
