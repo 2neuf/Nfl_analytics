@@ -49,7 +49,9 @@ def load_data_for_2026_season():
         df_depth['player_id'] = df_depth['gsis_id']
     
     # Conservation du depth_team le plus récent par joueur
-    df_depth_clean = df_depth.sort_values(by='week').groupby(['player_id', 'position']).agg(
+    sort_col ='week' if 'week' in df_dept.columns else 'dt'
+    
+    df_depth_clean = df_depth.sort_values(by=sort_col).groupby(['player_id', 'position']).agg(
         depth_team=('depth_team', 'last')
     ).reset_index()
 
