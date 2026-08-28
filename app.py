@@ -51,6 +51,13 @@ selected_criterion = st.sidebar.selectbox(
     options=list(criterion_options.keys())
 )
 
+# FILTRE SUR LE NIVEAU D'AVANTAGE (NOUVEAU)
+filter_advantage = st.sidebar.radio(
+    "Filtre d'avantage",
+    options=["Tous les avantages", "🔥 Gros avantages uniquement (OFF & DEF)"],
+    index=0
+)
+
 # Extraction de la position et de la catégorie de stat
 target_position, stat_category = criterion_options[selected_criterion]
 
@@ -116,14 +123,18 @@ df_merged['Mismatch Alert'] = df_merged[def_rank].apply(get_advantage_indicator)
 # 1. On garde uniquement les joueurs avec une moyenne ET ayant un indicateur (exclut les rangs 13 à 19)
 res_df = df_merged.dropna(subset=[m_avg, 'Mismatch Alert']).copy()
 
-# 2. Arrondi à l'entier
+# 2. Application du filtre "Gros avantages uniquement" si sélectionné
+if filter_advantage == "🔥 Gros avantages uniquement (OFF & DEF)":
+    res_df = res_df[res_df['Mismatch Alert'].isin(["🔥 Gros avantage OFF", "🔒 Gros avantage DEF"])]
+
+# Arrondi à l'entier pour toutes les colonnes de yards et de rang
 for col in [m_avg, m_l3, def_avg, def_rank]:
     res_df[col] = res_df[col].round(0).astype("Int64")
 
 # --- AFFICHAGE TABLEAU ---
 title_suffix = f" — {selected_game}" if selected_game != "Toutes les rencontres" else ""
 st.subheader(f"Matchups Semaine {selected_week}{title_suffix}")
-st.caption(f"🎯 **Critère sélectionné :** {selected_criterion} *(Les matchups neutres de rang 13 à 19 sont masqués)*")
+st.caption(f"🎯 **Critère sélectionné :** {selected_criterion}")
 
 name_col = 'player_name_x' if 'player_name_x' in res_df.columns else 'player_name'
 cols_display = [name_col, 'position', 'team', 'opponent_team', m_avg, m_l3, def_avg, def_rank, 'Mismatch Alert']
