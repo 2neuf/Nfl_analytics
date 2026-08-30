@@ -27,16 +27,19 @@ st.markdown("### ⚙️ Options de filtrage")
 col_week, col_game, col_crit, col_adv, col_limit = st.columns([1, 2.2, 3, 2.2, 1.4])
 
 with col_week:
-    available_weeks = sorted(schedule_2026['week'].unique())
+    available_weeks = sorted(schedule_2026['week'].unique()) if 'week' in schedule_2026.columns else [1]
     selected_week = st.selectbox("Semaine NFL", options=available_weeks, index=0)
 
 # Filtrage du calendrier pour la semaine choisie
-week_schedule = schedule_2026[schedule_2026['week'] == selected_week]
+week_schedule = schedule_2026[schedule_2026['week'] == selected_week] if 'week' in schedule_2026.columns else schedule_2026
 
 with col_game:
-    game_options = ["Toutes les rencontres"] + [
-        f"{row['away_team']} @ {row['home_team']}" for _, row in week_schedule.iterrows()
-    ]
+    if not week_schedule.empty and 'away_team' in week_schedule.columns and 'home_team' in week_schedule.columns:
+        game_options = ["Toutes les rencontres"] + [
+            f"{row['away_team']} @ {row['home_team']}" for _, row in week_schedule.iterrows()
+        ]
+    else:
+        game_options = ["Toutes les rencontres"]
     selected_game = st.selectbox("Rencontre", options=game_options)
 
 criterion_options = {
@@ -57,7 +60,6 @@ with col_crit:
 # Extraction de la position et de la catégorie de stat
 target_position, stat_category = criterion_options[selected_criterion]
 
-# Valeur par défaut dynamique par équipe selon la position sélectionnée
 default_team_limits = {
     "QB": 1,
     "RB": 2,
@@ -86,36 +88,41 @@ with col_limit:
 st.markdown("---")
 
 # --- PRÉPARATION DES MATCHUPS 2026 ---
-home_teams = week_schedule[['home_team', 'away_team']].rename(columns={'home_team': 'team', 'away_team': 'opponent_team'})
-away_teams = week_schedule[['away_team', 'home_team']].rename(columns={'away_team': 'team', 'home_team': 'opponent_team'})
-matchups_2026 = pd.concat([home_teams, away_teams])
+if not week_schedule.empty and 'home_team' in week_schedule.columns and 'away_team' in week_schedule.columns:
+    home_teams = week_schedule[['home_team', 'away_team']].rename(columns={'home_team': 'team', 'away_team': 'opponent_team'})
+    away_teams = week_schedule[['away_team', 'home_team']].rename(columns={'away_team': 'team', 'home_team': 'opponent_team'})
+    matchups_2026 = pd.concat([home_teams, away_teams])
+else:
+    matchups_2026 = pd.DataFrame(columns=['team', 'opponent_team'])
 
 # Merge Roster & Calendrier de la semaine
-df_merged = pd.merge(roster_2026, matchups_2026, on='team', how='inner')
+df_merged = pd.merge(roster_2026, matchups_2026, on='team', how='inner') if not matchups_2026.empty else roster_2026.copy()
 
 # Filtrage par rencontre si sélectionnée
-if selected_game != "Toutes les rencontres":
+if selected_game != "Toutes les rencontres" and " @ " in selected_game:
     away, home = selected_game.split(" @ ")
     df_merged = df_merged[df_merged['team'].isin([away, home])]
 
 # Filtrage strict sur la position unique du critère
-df_merged = df_merged[df_merged['position'] == target_position]
+if 'position' in df_merged.columns:
+    df_merged = df_merged[df_merged['position'] == target_position]
 
 # --- FUSION AVEC STATS JOUEURS ---
 merge_key = 'player_id' if ('player_id' in df_merged.columns and 'player_id' in players_df.columns) else 'player_name'
-df_merged = pd.merge(df_merged, players_df, on=merge_key, how='left')
+df_merged = pd.merge(df_merged, players_df, on=merge_key, how='inner')
 
 # Alignement du nom de colonne position après merge
 if 'position_x' in df_merged.columns:
     df_merged['position'] = df_merged['position_x']
 
 # --- FUSION AVEC DÉFENSES (PAR OPPONENT_TEAM ET POSITION) ---
-df_merged = pd.merge(
-    df_merged, 
-    def_df, 
-    on=['opponent_team', 'position'], 
-    how='left'
-)
+if not def_df.empty and 'opponent_team' in df_merged.columns and 'position' in df_merged.columns:
+    df_merged = pd.merge(
+        df_merged, 
+        def_df, 
+        on=['opponent_team', 'position'], 
+        how='left'
+    )
 
 # --- SÉLECTION DES COLONNES DE STATS ---
 if stat_category == "receiving":
@@ -138,56 +145,62 @@ def get_advantage_indicator(rank):
     elif 1 <= rank <= 6:
         return "🔒 Gros avantage DEF"
     else:
-        # Rangs 13 à 19 (Zone neutre) : Exclus
         return None
 
-df_merged['Mismatch Alert'] = df_merged[def_rank].apply(get_advantage_indicator)
+if def_rank in df_merged.columns:
+    df_merged['Mismatch Alert'] = df_merged[def_rank].apply(get_advantage_indicator)
+else:
+    df_merged['Mismatch Alert'] = None
 
 # --- FORMATAGE ET FILTRAGE DU TABLEAU ---
-# 1. Conservation uniquement des joueurs avec une moyenne ET ayant un indicateur (exclut les rangs 13 à 19)
-res_df = df_merged.dropna(subset=[m_avg, 'Mismatch Alert']).copy()
+if m_avg in df_merged.columns:
+    res_df = df_merged.dropna(subset=[m_avg, 'Mismatch Alert']).copy()
+else:
+    res_df = pd.DataFrame()
 
-# 2. Application du filtre "Gros avantages uniquement" si sélectionné
-if filter_advantage == "🔥 Gros avantages uniquement (OFF & DEF)":
-    res_df = res_df[res_df['Mismatch Alert'].isin(["🔥 Gros avantage OFF", "🔒 Gros avantage DEF"])]
+if not res_df.empty:
+    # 2. Application du filtre "Gros avantages uniquement" si sélectionné
+    if filter_advantage == "🔥 Gros avantages uniquement (OFF & DEF)":
+        res_df = res_df[res_df['Mismatch Alert'].isin(["🔥 Gros avantage OFF", "🔒 Gros avantage DEF"])]
 
-# Arrondi à l'entier pour toutes les colonnes de yards et de rang
-for col in [m_avg, m_l3, def_avg, def_rank]:
-    res_df[col] = res_df[col].round(0).astype("Int64")
+    # Arrondi à l'entier SÉCURISÉ pour toutes les colonnes présentes
+    for col in [m_avg, m_l3, def_avg, def_rank]:
+        if col in res_df.columns:
+            res_df[col] = pd.to_numeric(res_df[col], errors='coerce').round(0).astype("Int64")
 
-col_player_avg = f'Moy. Joueur ({base_year})'
-name_col = 'player_name_x' if 'player_name_x' in res_df.columns else 'player_name'
-cols_display = [name_col, 'position', 'team', 'opponent_team', m_avg, m_l3, def_avg, def_rank, 'Mismatch Alert']
+    col_player_avg = f'Moy. Joueur ({base_year})'
+    name_col = 'player_name_x' if 'player_name_x' in res_df.columns else ('player_name' if 'player_name' in res_df.columns else 'Joueur')
+    
+    cols_display = [c for c in [name_col, 'position', 'team', 'opponent_team', m_avg, m_l3, def_avg, def_rank, 'Mismatch Alert'] if c in res_df.columns]
 
-res_df = res_df[cols_display].rename(columns={
-    name_col: 'Joueur',
-    'position': 'Pos',
-    'team': 'Équipe',
-    'opponent_team': 'Adversaire',
-    m_avg: col_player_avg,
-    m_l3: 'Derniers Matchs',
-    def_avg: f'Yards Concédés/M aux {target_position}',
-    def_rank: f'Rang Déf. vs {target_position} ({base_year})',
-    'Mismatch Alert': 'Indicateur'
-})
+    res_df = res_df[cols_display].rename(columns={
+        name_col: 'Joueur',
+        'position': 'Pos',
+        'team': 'Équipe',
+        'opponent_team': 'Adversaire',
+        m_avg: col_player_avg,
+        m_l3: 'Derniers Matchs',
+        def_avg: f'Yards Concédés/M aux {target_position}',
+        def_rank: f'Rang Déf. vs {target_position} ({base_year})',
+        'Mismatch Alert': 'Indicateur'
+    })
 
-# --- TRI ET FILTRAGE PAR ÉQUIPE ---
-# 1. Tri global par la moyenne du joueur (décroissant)
-res_df = res_df.sort_values(by=col_player_avg, ascending=False)
+    # --- TRI ET FILTRAGE PAR ÉQUIPE ---
+    if col_player_avg in res_df.columns and 'Équipe' in res_df.columns:
+        res_df = res_df.sort_values(by=col_player_avg, ascending=False)
+        res_df = res_df.groupby('Équipe').head(max_players_per_team)
+        res_df = res_df.sort_values(by=col_player_avg, ascending=False)
 
-# 2. Conservation des N meilleurs joueurs PAR ÉQUIPE
-res_df = res_df.groupby('Équipe').head(max_players_per_team)
+    # Réinitialisation de l'index
+    res_df = res_df.reset_index(drop=True)
+    res_df.index = res_df.index + 1
 
-# 3. Retri final pour garder l'ordre décroissant sur la vue d'ensemble
-res_df = res_df.sort_values(by=col_player_avg, ascending=False)
+    # --- AFFICHAGE TABLEAU ---
+    title_suffix = f" — {selected_game}" if selected_game != "Toutes les rencontres" else ""
+    st.subheader(f"Matchups Semaine {selected_week}{title_suffix}")
+    st.caption(f"🎯 **Critère sélectionné :** {selected_criterion} | Max. {max_players_per_team} {target_position} par équipe")
 
-# 4. RÉINITIALISATION DE L'INDEX (1, 2, 3...)
-res_df = res_df.reset_index(drop=True)
-res_df.index = res_df.index + 1
-
-# --- AFFICHAGE TABLEAU ---
-title_suffix = f" — {selected_game}" if selected_game != "Toutes les rencontres" else ""
-st.subheader(f"Matchups Semaine {selected_week}{title_suffix}")
-st.caption(f"🎯 **Critère sélectionné :** {selected_criterion} | Max. {max_players_per_team} {target_position} par équipe")
-
-st.dataframe(res_df, use_container_width=True)
+    # Utilisation de la nouvelle norme Streamlit pour la largeur
+    st.dataframe(res_df, width="stretch")
+else:
+    st.warning("Aucune donnée ou aucun mismatch correspondant trouvé pour ce critère et ces filtres.")
