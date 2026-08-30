@@ -11,15 +11,15 @@ st.title("🏈 NFL Mismatch Finder 2026")
 
 @st.cache_data(ttl=3600)
 def get_dashboard_data():
-    df_base, schedule_2026, roster_2026, base_year = load_data_for_2026_season()
+    df_base, schedule_2026, roster_2026, injuries_2026, base_year = load_data_for_2026_season()
     def_pos_stats = calculate_2025_defense_by_position(df_base)
     player_baselines = calculate_2025_player_baselines(df_base, def_pos_stats)
-    return player_baselines, schedule_2026, roster_2026, def_pos_stats, base_year
+    return player_baselines, schedule_2026, roster_2026, injuries_2026, def_pos_stats, base_year
 
 with st.spinner("Chargement des données NFL en cours..."):
-    players_df, schedule_2026, roster_2026, def_df, base_year = get_dashboard_data()
+    players_df, schedule_2026, roster_2026, injuries_df, def_df, base_year = get_dashboard_data()
 
-st.info(f"💡 Données de référence basées sur la saison **{base_year}** (Hors blessures prématurées < 20% snaps).")
+st.info(f"💡 Données de référence basées sur la saison **{base_year}**.")
 
 # --- BARRE DE FILTRES HORIZONTALE ---
 st.markdown("### ⚙️ Options de filtrage")
@@ -51,10 +51,7 @@ criterion_options = {
 }
 
 with col_crit:
-    selected_criterion = st.selectbox(
-        "Critère d'analyse",
-        options=list(criterion_options.keys())
-    )
+    selected_criterion = st.selectbox("Critère d'analyse", options=list(criterion_options.keys()))
 
 target_position, stat_category = criterion_options[selected_criterion]
 
@@ -70,7 +67,7 @@ with col_adv:
 
 with col_limit:
     max_players_per_team = st.number_input(
-        "Limite par équipe",
+        "Limite par équipe (actifs)",
         min_value=1,
         max_value=10,
         value=default_limit,
@@ -108,7 +105,34 @@ if 'position_x' in df_merged.columns:
 if not def_df.empty and 'opponent_team' in df_merged.columns and 'position' in df_merged.columns:
     df_merged = pd.merge(df_merged, def_df, on=['opponent_team', 'position'], how='left')
 
-# --- SÉLECTION DES COLONNES DE STATS (INCLUANT MOYENNE AJUSTÉE) ---
+# --- FUSION AVEC RAPPORTS DE BLESSURES (SEMAINE SÉLECTIONNÉE) ---
+if not injuries_df.empty and 'week' in injuries_df.columns:
+    inj_week = injuries_df[injuries_df['week'] == selected_week]
+    inj_key = 'player_id' if ('player_id' in df_merged.columns and 'player_id' in inj_week.columns) else 'player_name'
+    
+    cols_inj = [inj_key, 'report_status'] if 'report_status' in inj_week.columns else [inj_key]
+    df_merged = pd.merge(df_merged, inj_week[cols_inj], on=inj_key, how='left')
+else:
+    df_merged['report_status'] = None
+
+# Fonction de formatage du statut
+def format_status(status):
+    if pd.isnull(status) or not status:
+        return "🟢 Dispo"
+    status_clean = str(status).upper()
+    if "OUT" in status_clean:
+        return "🚨 Out"
+    elif "IR" in status_clean or "INJURED RESERVE" in status_clean:
+        return "🏥 IR"
+    elif "DOUBTFUL" in status_clean:
+        return "❌ Doubtful"
+    elif "QUESTIONABLE" in status_clean:
+        return "⚠️ Questionable"
+    return f"ℹ️ {status}"
+
+df_merged['Statut'] = df_merged['report_status'].apply(format_status)
+
+# --- SÉLECTION DES COLONNES DE STATS ---
 if stat_category == "receiving":
     m_avg, m_adj, m_l3, def_rank, def_avg = "rec_yds_avg", "rec_yds_adj", "rec_yds_l3", "rec_def_rank", "rec_yds_allowed_pg"
 elif stat_category == "rushing":
@@ -155,7 +179,7 @@ if not res_df.empty:
     col_player_adj = f'Moy. Ajustée ({base_year})'
     name_col = 'player_name_x' if 'player_name_x' in res_df.columns else ('player_name' if 'player_name' in res_df.columns else 'Joueur')
     
-    cols_display = [c for c in [name_col, 'position', 'team', 'opponent_team', m_avg, m_adj, m_l3, def_avg, def_rank, 'Mismatch Alert'] if c in res_df.columns]
+    cols_display = [c for c in [name_col, 'position', 'Statut', 'team', 'opponent_team', m_avg, m_adj, m_l3, def_avg, def_rank, 'Mismatch Alert'] if c in res_df.columns]
 
     res_df = res_df[cols_display].rename(columns={
         name_col: 'Joueur',
@@ -170,11 +194,22 @@ if not res_df.empty:
         'Mismatch Alert': 'Indicateur'
     })
 
-    # Tri par la Moyenne Ajustée
+    # --- REGLE DU SAUT DE LIMITE PAR EQUIPE POUR LES INACTIFS ---
     sort_col = col_player_adj if col_player_adj in res_df.columns else col_player_avg
     if sort_col in res_df.columns and 'Équipe' in res_df.columns:
         res_df = res_df.sort_values(by=sort_col, ascending=False)
-        res_df = res_df.groupby('Équipe').head(max_players_per_team)
+        
+        # Identifie si le joueur est inactif
+        res_df['is_inactive'] = res_df['Statut'].isin(["🚨 Out", "🏥 IR"])
+        
+        # Compte de rang uniquement parmi les joueurs ACTIFS
+        res_df['active_rank'] = res_df[~res_df['is_inactive']].groupby('Équipe').cumcount() + 1
+        
+        # On garde : TOUS les inactifs + les actifs dont le rang actif <= limite
+        res_df = res_df[(res_df['is_inactive']) | (res_df['active_rank'] <= max_players_per_team)]
+        
+        # Nettoyage des colonnes temporaires et re-tri
+        res_df = res_df.drop(columns=['is_inactive', 'active_rank'])
         res_df = res_df.sort_values(by=sort_col, ascending=False)
 
     res_df = res_df.reset_index(drop=True)
@@ -183,7 +218,7 @@ if not res_df.empty:
     # Affichage
     title_suffix = f" — {selected_game}" if selected_game != "Toutes les rencontres" else ""
     st.subheader(f"Matchups Semaine {selected_week}{title_suffix}")
-    st.caption(f"🎯 **Critère sélectionné :** {selected_criterion} | Max. {max_players_per_team} {target_position} par équipe")
+    st.caption(f"🎯 **Critère sélectionné :** {selected_criterion} | Max. {max_players_per_team} {target_position} actif(s) par équipe")
 
     st.dataframe(res_df, width="stretch")
 else:
