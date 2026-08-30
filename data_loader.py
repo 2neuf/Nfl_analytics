@@ -2,7 +2,7 @@ import nflreadpy as nfl
 import pandas as pd
 
 def load_data_for_2026_season():
-    """Charge les stats, rosters, calendriers et snap counts via nflreadpy."""
+    """Charge les stats, rosters, calendriers, snap counts et blessures via nflreadpy."""
     try:
         df_players_base = nfl.load_player_stats(seasons=[2025], summary_level="week").to_pandas()
         base_year = 2025
@@ -16,27 +16,20 @@ def load_data_for_2026_season():
     elif 'week' in df_players_base.columns:
         df_players_base = df_players_base[df_players_base['week'] <= 18].copy()
 
-    # Normalisation des noms de colonnes dans les stats joueurs
     if 'player_name' not in df_players_base.columns and 'player_display_name' in df_players_base.columns:
         df_players_base['player_name'] = df_players_base['player_display_name']
 
-    # --- CHARGEMENT DES SNAP COUNTS POUR EXCLURE LES BLESSURES EN COURS DE MATCH ---
+    # --- SNAP COUNTS ---
     try:
         snaps_df = nfl.load_snap_counts(seasons=[base_year]).to_pandas()
         if 'offense_pct' in snaps_df.columns:
-            # Normalisation gsis_id -> player_id
             if 'pfr_player_id' in snaps_df.columns and 'player_id' not in snaps_df.columns:
                 snaps_df['player_id'] = snaps_df['pfr_player_id']
-            
-            # Fusion des snaps avec les stats hebdomadaires
-            cols_snaps = ['player_id', 'week', 'offense_pct']
-            cols_snaps = [c for c in cols_snaps if c in snaps_df.columns]
+            cols_snaps = [c for c in ['player_id', 'week', 'offense_pct'] if c in snaps_df.columns]
             df_players_base = pd.merge(df_players_base, snaps_df[cols_snaps], on=['player_id', 'week'], how='left')
-            
-            # Filtrage : On conserve uniquement les matchs joués avec au moins 20% des snaps (ou si donnée snap indisponible)
             df_players_base = df_players_base[(df_players_base['offense_pct'].isnull()) | (df_players_base['offense_pct'] >= 0.20)].copy()
     except Exception:
-        pass # En cas d'erreur de chargement des snaps, on garde le dataset de base
+        pass
 
     try:
         schedule_2026 = nfl.load_schedules(seasons=[2026]).to_pandas()
@@ -48,7 +41,6 @@ def load_data_for_2026_season():
     except Exception:
         roster_2026 = nfl.load_rosters(seasons=[2025]).to_pandas()
 
-    # Normalisation des colonnes clés du roster
     if 'gsis_id' in roster_2026.columns:
         roster_2026['player_id'] = roster_2026['gsis_id']
     if 'team_abbr' in roster_2026.columns and 'team' not in roster_2026.columns:
@@ -56,21 +48,27 @@ def load_data_for_2026_season():
     if 'full_name' in roster_2026.columns and 'player_name' not in roster_2026.columns:
         roster_2026['player_name'] = roster_2026['full_name']
 
-    return df_players_base, schedule_2026, roster_2026, base_year
+    # --- CHARGEMENT DES BLESSURES ---
+    try:
+        injuries_2026 = nfl.load_injuries(seasons=[2026]).to_pandas()
+        if 'gsis_id' in injuries_2026.columns and 'player_id' not in injuries_2026.columns:
+            injuries_2026['player_id'] = injuries_2026['gsis_id']
+    except Exception:
+        injuries_2026 = pd.DataFrame()
+
+    return df_players_base, schedule_2026, roster_2026, injuries_2026, base_year
 
 
 def calculate_2025_player_baselines(df_players_base, def_pos_stats):
-    """Calcule les moyennes brutes ET les moyennes ajustées par la difficulté des défenses affrontées."""
+    """Calcule les moyennes brutes ET les moyennes ajustées par la difficulté des défenses."""
     df_players_base = df_players_base.sort_values(by=['player_id', 'week'])
 
-    # 1. Calcul des moyennes brutes
     player_stats = df_players_base.groupby(['player_id', 'player_name', 'position']).agg(
         pass_yds_avg=('passing_yards', 'mean'),
         rush_yds_avg=('rushing_yards', 'mean'),
         rec_yds_avg=('receiving_yards', 'mean'),
     ).reset_index()
 
-    # 2. Calcul des 3 derniers matchs
     df_players_base['rec_l3'] = df_players_base.groupby('player_id')['receiving_yards'].transform(lambda x: x.tail(3).mean())
     df_players_base['rush_l3'] = df_players_base.groupby('player_id')['rushing_yards'].transform(lambda x: x.tail(3).mean())
     df_players_base['pass_l3'] = df_players_base.groupby('player_id')['passing_yards'].transform(lambda x: x.tail(3).mean())
@@ -83,9 +81,7 @@ def calculate_2025_player_baselines(df_players_base, def_pos_stats):
 
     base_merged = pd.merge(player_stats, l3_stats, on='player_id', how='left')
 
-    # 3. CALCUL DES MOYENNES AJUSTÉES (PONDÉRATION SELON L'ADVERSAIRE)
     if def_pos_stats is not None and not def_pos_stats.empty and 'opponent_team' in df_players_base.columns:
-        # Moyenne globale de la Ligue par position
         league_pos_avg = def_pos_stats.groupby('position').agg(
             league_pass_avg=('pass_yds_allowed_pg', 'mean'),
             league_rush_avg=('rush_yds_allowed_pg', 'mean'),
@@ -98,12 +94,10 @@ def calculate_2025_player_baselines(df_players_base, def_pos_stats):
             how='left'
         ).merge(league_pos_avg, on='position', how='left')
 
-        # Facteurs de difficulté (Fd = Moyenne Ligue / Concédé par l'adversaire)
         df_adj['pass_factor'] = (df_adj['league_pass_avg'] / df_adj['pass_yds_allowed_pg']).fillna(1.0)
         df_adj['rush_factor'] = (df_adj['league_rush_avg'] / df_adj['rush_yds_allowed_pg']).fillna(1.0)
         df_adj['rec_factor'] = (df_adj['league_rec_avg'] / df_adj['rec_yds_allowed_pg']).fillna(1.0)
 
-        # Application du facteur match par match
         df_adj['pass_yds_adj_match'] = df_adj['passing_yards'] * df_adj['pass_factor']
         df_adj['rush_yds_adj_match'] = df_adj['rushing_yards'] * df_adj['rush_factor']
         df_adj['rec_yds_adj_match'] = df_adj['receiving_yards'] * df_adj['rec_factor']
@@ -120,7 +114,7 @@ def calculate_2025_player_baselines(df_players_base, def_pos_stats):
 
 
 def calculate_2025_defense_by_position(df_players_base):
-    """Calcule les stats et rankings défensifs de saison régulière découpés par équipe ET par position."""
+    """Calcule les stats et rankings défensifs de saison régulière par équipe ET par position."""
     if 'opponent_team' not in df_players_base.columns or df_players_base.empty:
         return pd.DataFrame()
 
