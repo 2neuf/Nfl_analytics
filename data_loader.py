@@ -51,6 +51,7 @@ def calculate_2025_player_baselines(df_players_base):
         rec_yds_avg=('receiving_yards', 'mean'),
     ).reset_index()
 
+    # Calcul sécurisé des 3 derniers matchs
     df_players_base['rec_l3'] = df_players_base.groupby('player_id')['receiving_yards'].transform(lambda x: x.tail(3).mean())
     df_players_base['rush_l3'] = df_players_base.groupby('player_id')['rushing_yards'].transform(lambda x: x.tail(3).mean())
     df_players_base['pass_l3'] = df_players_base.groupby('player_id')['passing_yards'].transform(lambda x: x.tail(3).mean())
@@ -66,10 +67,12 @@ def calculate_2025_player_baselines(df_players_base):
 
 def calculate_2025_defense_by_position(df_players_base):
     """
-    Calcule les stats et rankings défensifs de saison régulière découpés par équipe ET par position adverse,
-    en divisant par le nombre exact de matchs joués par la défense.
+    Calcule les stats et rankings défensifs de saison régulière découpés par équipe ET par position exacte.
     """
-    # 1. Nombre exact de matchs joués par chaque équipe défensive (prend en compte la week de bye)
+    if 'opponent_team' not in df_players_base.columns or df_players_base.empty:
+        return pd.DataFrame()
+
+    # 1. Nombre exact de matchs joués par chaque équipe défensive
     games_per_team = (
         df_players_base.groupby('opponent_team')['week']
         .nunique()
@@ -77,22 +80,22 @@ def calculate_2025_defense_by_position(df_players_base):
         .rename(columns={'week': 'games_played'})
     )
 
-    # 2. Agrégation des yards concédés par défense et par position exacte du joueur
+    # 2. Agrégation des yards concédés par défense et par position
     def_pos_stats = df_players_base.groupby(['opponent_team', 'position']).agg(
         rec_yds_allowed=('receiving_yards', 'sum'),
         rush_yds_allowed=('rushing_yards', 'sum'),
         pass_yds_allowed=('passing_yards', 'sum')
     ).reset_index()
 
-    # 3. Fusion avec le nombre de matchs joués par l'équipe
+    # 3. Fusion avec le nombre de matchs
     def_pos_stats = pd.merge(def_pos_stats, games_per_team, on='opponent_team', how='left')
 
-    # 4. Calcul des moyennes par match réels (Total yards concédés à la position / Nombre de matchs)
+    # 4. Calcul des moyennes par match
     def_pos_stats['rec_yds_allowed_pg'] = def_pos_stats['rec_yds_allowed'] / def_pos_stats['games_played']
     def_pos_stats['rush_yds_allowed_pg'] = def_pos_stats['rush_yds_allowed'] / def_pos_stats['games_played']
     def_pos_stats['pass_yds_allowed_pg'] = def_pos_stats['pass_yds_allowed'] / def_pos_stats['games_played']
 
-    # 5. Rankings défensifs par position (1 = défense qui concède le moins, 32 = concède le plus)
+    # 5. Rankings défensifs (1 = concède le moins, 32 = concède le plus)
     def_pos_stats['rec_def_rank'] = def_pos_stats.groupby('position')['rec_yds_allowed_pg'].rank(ascending=True)
     def_pos_stats['rush_def_rank'] = def_pos_stats.groupby('position')['rush_yds_allowed_pg'].rank(ascending=True)
     def_pos_stats['pass_def_rank'] = def_pos_stats.groupby('position')['pass_yds_allowed_pg'].rank(ascending=True)
