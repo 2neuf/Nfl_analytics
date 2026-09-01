@@ -145,8 +145,6 @@ def format_status(row):
         return "🚫 DNR"
     elif "PUP" in sleeper_stat:
         return "🏥 PUP"
-    elif "NA" in sleeper_stat:
-        return "🛑 NA"
     elif "SUS" in sleeper_stat:
         return "🛑 Suspendu"
     elif "IR" in sleeper_stat or "INJURED" in sleeper_stat:
@@ -155,8 +153,10 @@ def format_status(row):
         return "🚨 Out"
     elif "DOUBTFUL" in sleeper_stat or "DOUBTFUL" in rep_stat:
         return "❌ Doubtful"
-    elif "Questionable" in sleeper_stat or "QUESTIONABLE" in rep_stat:
+    elif "QUESTIONABLE" in sleeper_stat or "QUESTIONABLE" in rep_stat:
         return "⚠️ Questionable"
+    elif "NA" in sleeper_stat:
+        return "🛑 NA"
         
     return "🟢 Dispo"
 
