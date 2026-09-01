@@ -155,7 +155,7 @@ def format_status(row):
         return "❌ Doubtful"
     elif "QUESTIONABLE" in sleeper_stat or "QUESTIONABLE" in rep_stat:
         return "⚠️ Questionable"
-    elif "NA" in sleeper_stat:
+    elif not "none" in sleeper_stat:
         return "🛑 NA"
         
     return "🟢 Dispo"
