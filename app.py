@@ -127,12 +127,24 @@ else:
 
 # --- FUSION AVEC LES STATUTS SLEEPER TEMPS RÉEL ---
 if not sleeper_df.empty:
-    merge_key = 'player_id' if ('player_id' in df_merged.columns and 'gsis_id' in sleeper_df.columns) else 'player_name'
-    sleeper_key = 'gsis_id' if merge_key == 'player_id' else 'player_name'
-    
-    df_merged = pd.merge(df_merged, sleeper_df[[sleeper_key, 'sleeper_status']], left_on=merge_key, right_on=sleeper_key, how='left')
+    # 1. On s'assure que les colonnes d'identifiants sont bien en string propre
+    if 'player_id' in df_merged.columns:
+        df_merged['join_id'] = df_merged['player_id'].astype(str).str.strip()
+    elif 'gsis_id' in df_merged.columns:
+        df_merged['join_id'] = df_merged['gsis_id'].astype(str).str.strip()
+    else:
+        df_merged['join_id'] = df_merged['player_name'].astype(str).str.strip()
+
+    if 'gsis_id' in sleeper_df.columns:
+        sleeper_df['join_id'] = sleeper_df['gsis_id'].astype(str).str.strip()
+    else:
+        sleeper_df['join_id'] = sleeper_df['player_name'].astype(str).str.strip()
+
+    # 2. Fusion sur l'ID unique (ou fallback sur le nom si ID absent)
+    df_merged = pd.merge(df_merged, sleeper_df[['join_id', 'sleeper_status']], on='join_id', how='left')
 else:
     df_merged['sleeper_status'] = None
+
 
 
 # --- FORMATAGE DYNAMIQUE DU STATUT ---
