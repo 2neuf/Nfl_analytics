@@ -139,7 +139,10 @@ else:
 def format_status(row):
     sleeper_stat = str(row['sleeper_status']).upper() if pd.notnull(row.get('sleeper_status')) else ""
     rep_stat = str(row['report_status']).upper() if pd.notnull(row.get('report_status')) else ""
-    
+
+    if sleeper_stat=="NA":
+        return "🛑 NA"
+        
     # Prise en compte prioritaire de Sleeper (Temps réel)
     if "DNR" in sleeper_stat or "DID NOT REPORT" in sleeper_stat:
         return "🚫 DNR"
@@ -155,8 +158,6 @@ def format_status(row):
         return "❌ Doubtful"
     elif "QUESTIONABLE" in sleeper_stat or "QUESTIONABLE" in rep_stat:
         return "⚠️ Questionable"
-    elif "NA" in sleeper_stat:
-        return "🛑 NA"
         
     return "🟢 Dispo"
 
