@@ -22,7 +22,7 @@ with st.spinner("Chargement des données NFL en cours..."):
 # 🔍 --- TEST DE DÉBOGAGE TEMPORAIRE ---
 st.markdown("### 🔍 Test Débogage Sleeper")
 if not sleeper_df.empty and 'player_name' in sleeper_df.columns:
-    jacobs_debug = sleeper_df[sleeper_df['player_name'].str.contains("Ham", case=False, na=False)]
+    jacobs_debug = sleeper_df[sleeper_df['player_name'].str.contains("C.J. Ham", case=False, na=False)]
     st.write("Résultat Sleeper pour Jacobs :", jacobs_debug)
 else:
     st.write("Le dataframe `sleeper_df` est vide ou ne contient pas la colonne `player_name`.")
