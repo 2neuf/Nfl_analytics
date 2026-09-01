@@ -11,13 +11,13 @@ st.title("🏈 NFL Mismatch Finder 2026")
 
 @st.cache_data(ttl=3600)
 def get_dashboard_data():
-    df_base, schedule_2026, roster_2026, injuries_2026, base_year = load_data_for_2026_season()
+    df_base, schedule_2026, roster_2026, injuries_2026, sleeper_df, base_year = load_data_for_2026_season()
     def_pos_stats = calculate_2025_defense_by_position(df_base)
     player_baselines = calculate_2025_player_baselines(df_base, def_pos_stats)
-    return player_baselines, schedule_2026, roster_2026, injuries_2026, def_pos_stats, base_year
+    return player_baselines, schedule_2026, roster_2026, injuries_2026, sleeper_df, def_pos_stats, base_year
 
 with st.spinner("Chargement des données NFL en cours..."):
-    players_df, schedule_2026, roster_2026, injuries_df, def_df, base_year = get_dashboard_data()
+    players_df, schedule_2026, roster_2026, injuries_df, sleeper_df, def_df, base_year = get_dashboard_data()
 
 st.info(f"💡 Données de référence basées sur la saison **{base_year}**.")
 
@@ -115,22 +115,41 @@ if not injuries_df.empty and 'week' in injuries_df.columns:
 else:
     df_merged['report_status'] = None
 
-# Fonction de formatage du statut
-def format_status(status):
-    if pd.isnull(status) or not status:
-        return "🟢 Dispo"
-    status_clean = str(status).upper()
-    if "OUT" in status_clean:
-        return "🚨 Out"
-    elif "IR" in status_clean or "INJURED RESERVE" in status_clean:
-        return "🏥 IR"
-    elif "DOUBTFUL" in status_clean:
-        return "❌ Doubtful"
-    elif "QUESTIONABLE" in status_clean:
-        return "⚠️ Questionable"
-    return f"ℹ️ {status}"
+# --- FUSION AVEC LES STATUTS SLEEPER TEMPS RÉEL ---
+if not sleeper_df.empty:
+    merge_key = 'player_id' if ('player_id' in df_merged.columns and 'gsis_id' in sleeper_df.columns) else 'player_name'
+    sleeper_key = 'gsis_id' if merge_key == 'player_id' else 'player_name'
+    
+    df_merged = pd.merge(df_merged, sleeper_df[[sleeper_key, 'sleeper_status']], left_on=merge_key, right_on=sleeper_key, how='left')
+else:
+    df_merged['sleeper_status'] = None
 
-df_merged['Statut'] = df_merged['report_status'].apply(format_status)
+
+# --- FORMATAGE DYNAMIQUE DU STATUT ---
+def format_status(row):
+    sleeper_stat = str(row['sleeper_status']).upper() if pd.notnull(row.get('sleeper_status')) else ""
+    rep_stat = str(row['report_status']).upper() if pd.notnull(row.get('report_status')) else ""
+    
+    # Prise en compte prioritaire de Sleeper (Temps réel)
+    if "DNR" in sleeper_stat or "DID NOT REPORT" in sleeper_stat:
+        return "🚫 DNR"
+    elif "PUP" in sleeper_stat:
+        return "🏥 PUP"
+    elif "SUS" in sleeper_stat:
+        return "🛑 Suspendu"
+    elif "IR" in sleeper_stat or "INJURED" in sleeper_stat:
+        return "🏥 IR"
+    elif "OUT" in sleeper_stat or "OUT" in rep_stat:
+        return "🚨 Out"
+    elif "DOUBTFUL" in sleeper_stat or "DOUBTFUL" in rep_stat:
+        return "❌ Doubtful"
+    elif "QUESTIONABLE" in sleeper_stat or "QUESTIONABLE" in rep_stat:
+        return "⚠️ Questionable"
+        
+    return "🟢 Dispo"
+
+df_merged['Statut'] = df_merged.apply(format_status, axis=1)
+
 
 # --- SÉLECTION DES COLONNES DE STATS ---
 if stat_category == "receiving":
