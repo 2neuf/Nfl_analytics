@@ -100,7 +100,7 @@ def calculate_2025_player_baselines(df_players_base, def_pos_stats):
         df_adj['rec_factor'] = (df_adj['league_rec_avg'] / df_adj['rec_yds_allowed_pg']).fillna(1.0)
 
         for col in ['pass_factor','rush_factor','rec_factor']:
-            df_adj[col] = df_adj[col].replace([np.inf,-np.inf].1.0)
+            df_adj[col] = df_adj[col].replace([np.inf,-np.inf],1.0)
             
 
         df_adj['pass_yds_adj_match'] = df_adj['passing_yards'] * df_adj['pass_factor']
