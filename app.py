@@ -221,7 +221,8 @@ if not res_df.empty:
         res_df = res_df.sort_values(by=sort_col, ascending=False)
         
         # Identifie si le joueur est inactif
-        res_df['is_inactive'] = res_df['Statut'].isin(["🚨 Out", "🏥 IR"])
+        inactive_statuses = ["🚫 DNR","🏥 PUP","🛑 NA","🛑 Suspendu","🏥 IR","🚨 Out","❌ Doubtful"]
+        res_df['is_inactive'] = res_df['Statut'].isin(inactive_statuses)
         
         # Compte de rang uniquement parmi les joueurs ACTIFS
         res_df['active_rank'] = res_df[~res_df['is_inactive']].groupby('Équipe').cumcount() + 1
