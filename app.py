@@ -126,7 +126,7 @@ else:
     df_merged['report_status'] = None
 
 # --- FUSION AVEC SLEEPER (STATUT + ÉQUIPE TEMPS RÉEL) ---
-if not sleeper_df.empty:
+if not sleeper_df.empty and 'sleeper_team' in sleeper_df.columns:
     if 'player_id' in df_merged.columns:
         df_merged['join_id'] = df_merged['player_id'].astype(str).str.strip()
     else:
@@ -137,17 +137,17 @@ if not sleeper_df.empty:
     else:
         sleeper_df['join_id'] = sleeper_df['player_name'].astype(str).str.strip()
 
+    # Fusion
     df_merged = pd.merge(df_merged, sleeper_df[['join_id', 'sleeper_status', 'sleeper_team']], on='join_id', how='left')
 
-    # 🎯 Mise à jour de l'équipe : si Sleeper indique une équipe différente ou s'il est Free Agent
-    if 'sleeper_team' in df_merged.columns:
-        # On remplace l'équipe par celle de Sleeper si elle existe
-        df_merged['team'] = df_merged['sleeper_team'].fillna(df_merged['team'])
-        
-        # On filtre les joueurs qui n'ont plus d'équipe NFL (Free Agents / Coupés)
-        df_merged = df_merged[df_merged['team'].notnull() & (df_merged['team'] != "FA")]
+    # Remplacement de l'équipe si Sleeper a une info plus récente
+    df_merged['team'] = df_merged['sleeper_team'].fillna(df_merged['team'])
+    
+    # Suppression des Free Agents / Joueurs coupés
+    df_merged = df_merged[df_merged['team'].notnull() & (df_merged['team'] != "FA")]
 else:
     df_merged['sleeper_status'] = None
+
 
 
 
