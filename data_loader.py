@@ -17,14 +17,13 @@ def fetch_sleeper_statuses():
             for p_id, p_info in data.items():
                 gsis_id = p_info.get("gsis_id")
                 full_name = p_info.get("full_name")
-                status = p_info.get("status")
+                injury_status = p_info.get("injury_status")
                 
-                if status and status != "Active":
-                    records.append({
-                        'gsis_id': gsis_id,
-                        'player_name': full_name,
-                        'sleeper_status': status
-                    })
+                records.append({
+                    'gsis_id': gsis_id,
+                    'player_name': full_name,
+                    'sleeper_status': injury_status
+                })
             return pd.DataFrame(records)
     except Exception:
         pass
