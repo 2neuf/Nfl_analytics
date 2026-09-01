@@ -135,7 +135,7 @@ def format_status(row):
         return "🚫 DNR"
     elif "PUP" in sleeper_stat:
         return "🏥 PUP"
-    elif "NA" in sleeper_stat or "COE" in sleeper_stat:
+    elif "NA" in sleeper_stat or "EXEMPT" in sleeper_stat or "COE" in sleeper_stat:
         return "🛑 NA"
     elif "SUS" in sleeper_stat:
         return "🛑 Suspendu"
