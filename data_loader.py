@@ -1,6 +1,35 @@
 import nflreadpy as nfl
 import pandas as pd
 import numpy as np
+import requests
+import streamlit as st
+
+@st.cache_data(ttl=900)
+def fetch_sleeper_statuses():
+    """Récupère les statuts temps réel des joueurs depuis l'API Sleeper."""
+    url = "https://api.sleeper.app/v1/players/nfl"
+    try:
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            # On extrait le gsis_id (ou full_name) et le statut
+            records = []
+            for p_id, p_info in data.items():
+                gsis_id = p_info.get("gsis_id")
+                full_name = p_info.get("full_name")
+                status = p_info.get("status")
+                
+                if status and status != "Active":
+                    records.append({
+                        'gsis_id': gsis_id,
+                        'player_name': full_name,
+                        'sleeper_status': status
+                    })
+            return pd.DataFrame(records)
+    except Exception:
+        pass
+    return pd.DataFrame(columns=['gsis_id', 'player_name', 'sleeper_status'])
+
 
 def load_data_for_2026_season():
     """Charge les stats, rosters, calendriers, snap counts et blessures via nflreadpy."""
@@ -57,7 +86,9 @@ def load_data_for_2026_season():
     except Exception:
         injuries_2026 = pd.DataFrame()
 
-    return df_players_base, schedule_2026, roster_2026, injuries_2026, base_year
+    sleeper_injuries=fetch_sleeper_statuses()
+    
+    return df_players_base, schedule_2026, roster_2026, injuries_2026, sleeper_injuries, base_year
 
 
 def calculate_2025_player_baselines(df_players_base, def_pos_stats):
