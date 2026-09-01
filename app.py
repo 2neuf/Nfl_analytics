@@ -238,24 +238,32 @@ if not res_df.empty:
         'Mismatch Alert': 'Indicateur'
     })
 
-    # --- REGLE DU SAUT DE LIMITE PAR EQUIPE POUR LES INACTIFS ---
-    sort_col = col_player_adj if col_player_adj in res_df.columns else col_player_avg
-    if sort_col in res_df.columns and 'Équipe' in res_df.columns:
-        res_df = res_df.sort_values(by=sort_col, ascending=False)
-        
-        # Identifie si le joueur est inactif
-        inactive_statuses = ["🚫 DNR","🏥 PUP","🛑 NA","🛑 Suspendu","🏥 IR","🚨 Out","❌ Doubtful"]
-        res_df['is_inactive'] = res_df['Statut'].isin(inactive_statuses)
-        
-        # Compte de rang uniquement parmi les joueurs ACTIFS
-        res_df['active_rank'] = res_df[~res_df['is_inactive']].groupby('Équipe').cumcount() + 1
-        
-        # On garde : TOUS les inactifs + les actifs dont le rang actif <= limite
-        res_df = res_df[(res_df['is_inactive']) | (res_df['active_rank'] <= max_players_per_team)]
-        
-        # Nettoyage des colonnes temporaires et re-tri
-        res_df = res_df.drop(columns=['is_inactive', 'active_rank'])
-        res_df = res_df.sort_values(by=sort_col, ascending=False)
+    # --- LOGIQUE DYNAMIQUE DE CASCADE DES BLESSURES ---
+sort_col = col_player_adj if col_player_adj in res_df.columns else col_player_avg
+
+if sort_col in res_df.columns and 'Équipe' in res_df.columns:
+    # 1. Tri des joueurs du meilleur au moins bon
+    res_df = res_df.sort_values(by=sort_col, ascending=False)
+    
+    # 2. Identification des inactifs (Out, IR, PUP, NA, Exempt, etc.)
+    res_df['is_inactive'] = res_df['Statut'].ne("🟢 Dispo")
+    
+    # 3. Compte cumulatif des joueurs DISPONIBLES uniquement (0 pour les inactifs)
+    res_df['available_count'] = (~res_df['is_inactive']).astype(int)
+    res_df['cum_available'] = res_df.groupby('Équipe')['available_count'].cumsum()
+    
+    # 4. Conservation des joueurs :
+    # - Si le joueur est DISPONIBLE : on le garde si son rang de dispo <= limite (ex: <= 2)
+    # - Si le joueur est INACTIF : on le garde SEULEMENT S'IL EST ARRIVÉ AVANT d'atteindre la limite de disponibles
+    res_df = res_df[
+        (~res_df['is_inactive'] & (res_df['cum_available'] <= max_players_per_team)) |
+        (res_df['is_inactive'] & (res_df['cum_available'] < max_players_per_team))
+    ]
+    
+    # Nettoyage des colonnes de calcul et re-tri
+    res_df = res_df.drop(columns=['is_inactive', 'available_count', 'cum_available'])
+    res_df = res_df.sort_values(by=sort_col, ascending=False)
+
 
     res_df = res_df.reset_index(drop=True)
     res_df.index = res_df.index + 1
