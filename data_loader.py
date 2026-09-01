@@ -6,28 +6,33 @@ import streamlit as st
 
 @st.cache_data(ttl=900)
 def fetch_sleeper_statuses():
-    """Récupère les statuts temps réel des joueurs depuis l'API Sleeper."""
+    """Récupère les statuts et l'équipe actuelle depuis Sleeper."""
     url = "https://api.sleeper.app/v1/players/nfl"
     try:
         response = requests.get(url, timeout=5)
         if response.status_code == 200:
             data = response.json()
-            # On extrait le gsis_id (ou full_name) et le statut
             records = []
             for p_id, p_info in data.items():
                 gsis_id = p_info.get("gsis_id")
                 full_name = p_info.get("full_name")
-                injury_status = p_info.get("injury_status")
+                team = p_info.get("team") # 👈 Équipe actuelle chez Sleeper (ex: "MIN", "GB", None)
+                
+                inj_status = p_info.get("injury_status")
+                gen_status = p_info.get("status")
+                final_status = inj_status if inj_status else gen_status
                 
                 records.append({
-                    'gsis_id': gsis_id,
-                    'player_name': full_name,
-                    'sleeper_status': injury_status
+                    'gsis_id': str(gsis_id).strip() if gsis_id else None,
+                    'player_name': str(full_name).strip() if full_name else None,
+                    'sleeper_team': team,
+                    'sleeper_status': str(final_status).upper() if final_status else None
                 })
             return pd.DataFrame(records)
     except Exception:
         pass
-    return pd.DataFrame(columns=['gsis_id', 'player_name', 'sleeper_status'])
+    return pd.DataFrame(columns=['gsis_id', 'player_name', 'sleeper_team', 'sleeper_status'])
+
 
 
 def load_data_for_2026_season():
