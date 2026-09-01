@@ -19,6 +19,16 @@ def get_dashboard_data():
 with st.spinner("Chargement des données NFL en cours..."):
     players_df, schedule_2026, roster_2026, injuries_df, sleeper_df, def_df, base_year = get_dashboard_data()
 
+# 🔍 --- TEST DE DÉBOGAGE TEMPORAIRE ---
+st.markdown("### 🔍 Test Débogage Sleeper")
+if not sleeper_df.empty and 'player_name' in sleeper_df.columns:
+    jacobs_debug = sleeper_df[sleeper_df['player_name'].str.contains("Jacobs", case=False, na=False)]
+    st.write("Résultat Sleeper pour Jacobs :", jacobs_debug)
+else:
+    st.write("Le dataframe `sleeper_df` est vide ou ne contient pas la colonne `player_name`.")
+# --------------------------------------
+
+
 st.info(f"💡 Données de référence basées sur la saison **{base_year}**.")
 
 # --- BARRE DE FILTRES HORIZONTALE ---
