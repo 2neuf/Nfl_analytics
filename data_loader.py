@@ -36,8 +36,6 @@ def fetch_sleeper_statuses():
     return pd.DataFrame(columns=['gsis_id', 'player_name', 'sleeper_team', 'sleeper_status'])
 
 
-
-
 def load_data_for_2026_season():
     """Charge les stats, rosters, calendriers, snap counts et blessures via nflreadpy."""
     try:
@@ -93,7 +91,7 @@ def load_data_for_2026_season():
     except Exception:
         injuries_2026 = pd.DataFrame()
 
-    sleeper_injuries=fetch_sleeper_statuses()
+    sleeper_injuries = fetch_sleeper_statuses()
     
     return df_players_base, schedule_2026, roster_2026, injuries_2026, sleeper_injuries, base_year
 
@@ -139,7 +137,6 @@ def calculate_2025_player_baselines(df_players_base, def_pos_stats):
 
         for col in ['pass_factor','rush_factor','rec_factor']:
             df_adj[col] = df_adj[col].replace([np.inf,-np.inf],1.0)
-            
 
         df_adj['pass_yds_adj_match'] = df_adj['passing_yards'] * df_adj['pass_factor']
         df_adj['rush_yds_adj_match'] = df_adj['rushing_yards'] * df_adj['rush_factor']
