@@ -1,10 +1,11 @@
 import streamlit as st
 import pandas as pd
-
 from data_loader import (
     load_data_for_2026_season,
     calculate_2025_player_baselines,
-    calculate_2025_defense_by_position
+    calculate_2025_defense_by_position,
+    calculate_2026_player_baselines,
+    calculate_2026_defense_by_position
 )
 
 st.set_page_config(page_title="NFL Mismatch Finder 2026", layout="wide")
@@ -12,13 +13,17 @@ st.title("🏈 NFL Mismatch Finder 2026")
 
 @st.cache_data(ttl=3600)
 def get_dashboard_data():
-    df_base, schedule_2026, roster_2026, injuries_2026, sleeper_df, base_year = load_data_for_2026_season()
+    df_base, schedule_2026, roster_2026, injuries_2026, sleeper_df, df_players_2026, base_year = load_data_for_2026_season()
     def_pos_stats = calculate_2025_defense_by_position(df_base)
     player_baselines = calculate_2025_player_baselines(df_base, def_pos_stats)
-    return player_baselines, schedule_2026, roster_2026, injuries_2026, sleeper_df, def_pos_stats, base_year
+    
+    player_2026_stats = calculate_2026_player_baselines(df_players_2026)
+    def_2026_stats = calculate_2026_defense_by_position(df_players_2026)
+    
+    return player_baselines, schedule_2026, roster_2026, injuries_2026, sleeper_df, def_pos_stats, player_2026_stats, def_2026_stats, base_year
 
 with st.spinner("Chargement des données NFL en cours..."):
-    players_df, schedule_2026, roster_2026, injuries_df, sleeper_df, def_df, base_year = get_dashboard_data()
+    players_df, schedule_2026, roster_2026, injuries_df, sleeper_df, def_df, players_2026_df, def_2026_df, base_year = get_dashboard_data()
 
 st.info(f"💡 Données de référence basées sur la saison **{base_year}**.")
 
@@ -31,7 +36,7 @@ with col_week:
     available_weeks = sorted(schedule_2026['week'].unique()) if 'week' in schedule_2026.columns else [1]
     selected_week = st.selectbox("Semaine NFL", options=available_weeks, index=0)
 
-week_schedule = schedule_2026[schedule_2026['week'] == selected_week].copy() if 'week' in schedule_2026.columns else schedule_2026.copy()
+week_schedule = schedule_2026[schedule_2026['week'] == selected_week] if 'week' in schedule_2026.columns else schedule_2026
 
 with col_game:
     if not week_schedule.empty and 'away_team' in week_schedule.columns and 'home_team' in week_schedule.columns:
@@ -78,53 +83,13 @@ with col_limit:
 
 st.markdown("---")
 
-# --- FORMATAGE STATUT / SCORE DU MATCH ---
-def get_game_status_display(row):
-    """Détermine le libellé du statut / résultat du match (Joué vs Non Joué)."""
-    away = row.get('away_team', '')
-    home = row.get('home_team', '')
-    
-    home_score = row.get('home_score')
-    away_score = row.get('away_score')
-    
-    # Vérification si le score est renseigné (match joué ou en cours)
-    if pd.notnull(home_score) and pd.notnull(away_score):
-        h_score = int(home_score)
-        a_score = int(away_score)
-        
-        # Statut du match (ex: 'CLOSED', 'FINAL', etc. selon la source)
-        game_status = str(row.get('status', '')).upper()
-        if 'FINAL' in game_status or 'CLOSED' in game_status or pd.notnull(row.get('result')):
-            return f"🏁 Terminé ({away} {a_score} - {h_score} {home})"
-        else:
-            return f"🔴 En cours ({away} {a_score} - {h_score} {home})"
-            
-    # Si le match n'a pas encore eu lieu
-    gametime = row.get('gametime')
-    gdate = row.get('gameday') or row.get('game_date')
-    
-    if pd.notnull(gametime) and str(gametime) != "nan":
-        return f"🕒 A venir ({gdate} {gametime})"
-    elif pd.notnull(gdate) and str(gdate) != "nan":
-        return f"🕒 A venir ({gdate})"
-    
-    return "🕒 Non joué"
-
-
 # --- PRÉPARATION DES MATCHUPS 2026 ---
 if not week_schedule.empty and 'home_team' in week_schedule.columns and 'away_team' in week_schedule.columns:
-    # Applique la logique de calcul du statut de chaque rencontre
-    week_schedule['Game_Status_Info'] = week_schedule.apply(get_game_status_display, axis=1)
-
-    home_teams = week_schedule[['home_team', 'away_team', 'Game_Status_Info']].rename(
-        columns={'home_team': 'team', 'away_team': 'opponent_team'}
-    )
-    away_teams = week_schedule[['away_team', 'home_team', 'Game_Status_Info']].rename(
-        columns={'away_team': 'team', 'home_team': 'opponent_team'}
-    )
+    home_teams = week_schedule[['home_team', 'away_team']].rename(columns={'home_team': 'team', 'away_team': 'opponent_team'})
+    away_teams = week_schedule[['away_team', 'home_team']].rename(columns={'away_team': 'team', 'home_team': 'opponent_team'})
     matchups_2026 = pd.concat([home_teams, away_teams])
 else:
-    matchups_2026 = pd.DataFrame(columns=['team', 'opponent_team', 'Game_Status_Info'])
+    matchups_2026 = pd.DataFrame(columns=['team', 'opponent_team'])
 
 df_merged = pd.merge(roster_2026, matchups_2026, on='team', how='inner') if not matchups_2026.empty else roster_2026.copy()
 
@@ -135,28 +100,50 @@ if selected_game != "Toutes les rencontres" and " @ " in selected_game:
 if 'position' in df_merged.columns:
     df_merged = df_merged[df_merged['position'] == target_position]
 
-# --- FUSION AVEC STATS JOUEURS ---
+# --- FUSION AVEC STATS JOUEURS (SAISON BASE) ---
 merge_key = 'player_id' if ('player_id' in df_merged.columns and 'player_id' in players_df.columns) else 'player_name'
 df_merged = pd.merge(df_merged, players_df, on=merge_key, how='inner')
 
 if 'position_x' in df_merged.columns:
     df_merged['position'] = df_merged['position_x']
 
-# --- FUSION AVEC DÉFENSES ---
+# --- FUSION AVEC DÉFENSES (SAISON BASE) ---
 if not def_df.empty and 'opponent_team' in df_merged.columns and 'position' in df_merged.columns:
     df_merged = pd.merge(df_merged, def_df, on=['opponent_team', 'position'], how='left')
 
-# --- FUSION AVEC RAPPORTS DE BLESSURES (SEMAINE SÉLECTIONNÉE) ---
+# --- SÉLECTION DES COLONNES DE STATS SELON LE CRITÈRE ---
+if stat_category == "receiving":
+    m_avg, m_adj, m_l3, def_rank, def_avg = "rec_yds_avg", "rec_yds_adj", "rec_yds_l3", "rec_def_rank", "rec_yds_allowed_pg"
+    p_2026_avg, def_2026_avg, def_2026_rank = "rec_yds_avg_2026", "rec_yds_allowed_pg_2026", "rec_def_rank_2026"
+elif stat_category == "rushing":
+    m_avg, m_adj, m_l3, def_rank, def_avg = "rush_yds_avg", "rush_yds_adj", "rush_yds_l3", "rush_def_rank", "rush_yds_allowed_pg"
+    p_2026_avg, def_2026_avg, def_2026_rank = "rush_yds_avg_2026", "rush_yds_allowed_pg_2026", "rush_def_rank_2026"
+else:  # passing
+    m_avg, m_adj, m_l3, def_rank, def_avg = "pass_yds_avg", "pass_yds_adj", "pass_yds_l3", "pass_def_rank", "pass_yds_allowed_pg"
+    p_2026_avg, def_2026_avg, def_2026_rank = "pass_yds_avg_2026", "pass_yds_allowed_pg_2026", "pass_def_rank_2026"
+
+# --- FUSION STATS ET DÉFENSES 2026 ---
+if not players_2026_df.empty and 'player_id' in df_merged.columns:
+    df_merged = pd.merge(df_merged, players_2026_df[['player_id', p_2026_avg]], on='player_id', how='left')
+else:
+    df_merged[p_2026_avg] = None
+
+if not def_2026_df.empty and 'opponent_team' in df_merged.columns and 'position' in df_merged.columns:
+    df_merged = pd.merge(df_merged, def_2026_df[['opponent_team', 'position', def_2026_avg, def_2026_rank]], on=['opponent_team', 'position'], how='left')
+else:
+    df_merged[def_2026_avg] = None
+    df_merged[def_2026_rank] = None
+
+# --- FUSION AVEC RAPPORTS DE BLESSURES ---
 if not injuries_df.empty and 'week' in injuries_df.columns:
     inj_week = injuries_df[injuries_df['week'] == selected_week]
     inj_key = 'player_id' if ('player_id' in df_merged.columns and 'player_id' in inj_week.columns) else 'player_name'
-    
     cols_inj = [inj_key, 'report_status'] if 'report_status' in inj_week.columns else [inj_key]
     df_merged = pd.merge(df_merged, inj_week[cols_inj], on=inj_key, how='left')
 else:
     df_merged['report_status'] = None
 
-# --- FUSION AVEC SLEEPER (STATUT + ÉQUIPE TEMPS RÉEL) ---
+# --- FUSION AVEC SLEEPER ---
 if not sleeper_df.empty and 'sleeper_team' in sleeper_df.columns:
     if 'player_id' in df_merged.columns:
         df_merged['join_id'] = df_merged['player_id'].astype(str).str.strip()
@@ -168,26 +155,19 @@ if not sleeper_df.empty and 'sleeper_team' in sleeper_df.columns:
     else:
         sleeper_df['join_id'] = sleeper_df['player_name'].astype(str).str.strip()
 
-    # Fusion
     df_merged = pd.merge(df_merged, sleeper_df[['join_id', 'sleeper_status', 'sleeper_team']], on='join_id', how='left')
-
-    # Remplacement de l'équipe si Sleeper a une info plus récente
     df_merged['team'] = df_merged['sleeper_team'].fillna(df_merged['team'])
-    
-    # Suppression des Free Agents / Joueurs coupés
     df_merged = df_merged[df_merged['team'].notnull() & (df_merged['team'] != "FA")]
 else:
     df_merged['sleeper_status'] = None
 
-
-# --- FORMATAGE DYNAMIQUE DU STATUT JOUEUR ---
+# --- FORMATAGE DYNAMIQUE DU STATUT ---
 def format_status(row):
     sleeper_stat = str(row['sleeper_status']).upper() if pd.notnull(row.get('sleeper_status')) else ""
     rep_stat = str(row['report_status']).upper() if pd.notnull(row.get('report_status')) else ""
 
     if sleeper_stat == "NA":
         return "🛑 NA"
-        
     if "DNR" in sleeper_stat or "DID NOT REPORT" in sleeper_stat:
         return "🚫 DNR"
     elif "PUP" in sleeper_stat:
@@ -206,15 +186,6 @@ def format_status(row):
     return "🟢 Dispo"
 
 df_merged['Statut'] = df_merged.apply(format_status, axis=1)
-
-
-# --- SÉLECTION DES COLONNES DE STATS ---
-if stat_category == "receiving":
-    m_avg, m_adj, m_l3, def_rank, def_avg = "rec_yds_avg", "rec_yds_adj", "rec_yds_l3", "rec_def_rank", "rec_yds_allowed_pg"
-elif stat_category == "rushing":
-    m_avg, m_adj, m_l3, def_rank, def_avg = "rush_yds_avg", "rush_yds_adj", "rush_yds_l3", "rush_def_rank", "rush_yds_allowed_pg"
-else:  # passing
-    m_avg, m_adj, m_l3, def_rank, def_avg = "pass_yds_avg", "pass_yds_adj", "pass_yds_l3", "pass_def_rank", "pass_yds_allowed_pg"
 
 # --- LOGIQUE D'INDICATEUR ---
 def get_advantage_indicator(rank):
@@ -247,7 +218,7 @@ if not res_df.empty:
         res_df = res_df[res_df['Mismatch Alert'].isin(["🔥 Gros avantage OFF", "🔒 Gros avantage DEF"])]
 
     # Arrondi de sécurité
-    for col in [m_avg, m_adj, m_l3, def_avg, def_rank]:
+    for col in [m_avg, p_2026_avg, m_adj, m_l3, def_avg, def_2026_avg, def_rank, def_2026_rank]:
         if col in res_df.columns:
             res_df[col] = pd.to_numeric(res_df[col], errors='coerce').round(0).astype("Int64")
 
@@ -255,19 +226,25 @@ if not res_df.empty:
     col_player_adj = f'Moy. Ajustée ({base_year})'
     name_col = 'player_name_x' if 'player_name_x' in res_df.columns else ('player_name' if 'player_name' in res_df.columns else 'Joueur')
     
-    cols_display = [c for c in [name_col, 'position', 'Statut', 'team', 'opponent_team', 'Game_Status_Info', m_avg, m_adj, m_l3, def_avg, def_rank, 'Mismatch Alert'] if c in res_df.columns]
+    cols_display = [c for c in [
+        name_col, 'position', 'Statut', 'team', 'opponent_team', 
+        m_avg, p_2026_avg, m_adj, m_l3, 
+        def_avg, def_2026_avg, def_rank, def_2026_rank, 'Mismatch Alert'
+    ] if c in res_df.columns]
 
     res_df = res_df[cols_display].rename(columns={
         name_col: 'Joueur',
         'position': 'Pos',
         'team': 'Équipe',
         'opponent_team': 'Adversaire',
-        'Game_Status_Info': 'Match Status',
         m_avg: col_player_avg,
+        p_2026_avg: 'Moy. Brut 2026',
         m_adj: col_player_adj,
         m_l3: 'Derniers Matchs',
-        def_avg: f'Yards Concédés/M aux {target_position}',
+        def_avg: f'Yards Concédés/M aux {target_position} ({base_year})',
+        def_2026_avg: 'Yards Concédés/M 2026',
         def_rank: f'Rang Déf. vs {target_position} ({base_year})',
+        def_2026_rank: 'Rang Déf. 2026',
         'Mismatch Alert': 'Indicateur'
     })
 
@@ -275,30 +252,21 @@ if not res_df.empty:
     sort_col = col_player_adj if col_player_adj in res_df.columns else col_player_avg
 
     if sort_col in res_df.columns and 'Équipe' in res_df.columns:
-        # 1. Tri des joueurs du meilleur au moins bon
         res_df = res_df.sort_values(by=sort_col, ascending=False)
-        
-        # 2. Identification des inactifs
         res_df['is_inactive'] = res_df['Statut'].ne("🟢 Dispo")
-        
-        # 3. Compte cumulatif des joueurs DISPONIBLES uniquement
         res_df['available_count'] = (~res_df['is_inactive']).astype(int)
         res_df['cum_available'] = res_df.groupby('Équipe')['available_count'].cumsum()
         
-        # 4. Conservation des joueurs selon la limite
         res_df = res_df[
             (~res_df['is_inactive'] & (res_df['cum_available'] <= max_players_per_team)) |
             (res_df['is_inactive'] & (res_df['cum_available'] < max_players_per_team))
         ]
         
-        # Nettoyage des colonnes de calcul et re-tri
         res_df = res_df.drop(columns=['is_inactive', 'available_count', 'cum_available'])
         res_df = res_df.sort_values(by=sort_col, ascending=False)
-
         res_df = res_df.reset_index(drop=True)
         res_df.index = res_df.index + 1
 
-        # Affichage
         title_suffix = f" — {selected_game}" if selected_game != "Toutes les rencontres" else ""
         st.subheader(f"Matchups Semaine {selected_week}{title_suffix}")
         st.caption(f"🎯 **Critère sélectionné :** {selected_criterion} | Max. {max_players_per_team} {target_position} actif(s) par équipe")
