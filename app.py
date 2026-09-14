@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+
 from data_loader import (
     load_data_for_2026_season,
     calculate_2025_player_baselines,
@@ -19,16 +20,6 @@ def get_dashboard_data():
 with st.spinner("Chargement des données NFL en cours..."):
     players_df, schedule_2026, roster_2026, injuries_df, sleeper_df, def_df, base_year = get_dashboard_data()
 
-# 🔍 --- TEST DE DÉBOGAGE TEMPORAIRE ---
-#st.markdown("### 🔍 Test Débogage Sleeper")
-#if not sleeper_df.empty and 'player_name' in sleeper_df.columns:
- #   jacobs_debug = sleeper_df[sleeper_df['player_name'].str.contains("Jacobs", case=False, na=False)]
- #   st.write("Résultat Sleeper pour Jacobs :", jacobs_debug)
-#else:
-    #st.write("Le dataframe `sleeper_df` est vide ou ne contient pas la colonne `player_name`.")
-# --------------------------------------
-
-
 st.info(f"💡 Données de référence basées sur la saison **{base_year}**.")
 
 # --- BARRE DE FILTRES HORIZONTALE ---
@@ -40,7 +31,7 @@ with col_week:
     available_weeks = sorted(schedule_2026['week'].unique()) if 'week' in schedule_2026.columns else [1]
     selected_week = st.selectbox("Semaine NFL", options=available_weeks, index=0)
 
-week_schedule = schedule_2026[schedule_2026['week'] == selected_week] if 'week' in schedule_2026.columns else schedule_2026
+week_schedule = schedule_2026[schedule_2026['week'] == selected_week].copy() if 'week' in schedule_2026.columns else schedule_2026.copy()
 
 with col_game:
     if not week_schedule.empty and 'away_team' in week_schedule.columns and 'home_team' in week_schedule.columns:
@@ -87,13 +78,53 @@ with col_limit:
 
 st.markdown("---")
 
+# --- FORMATAGE STATUT / SCORE DU MATCH ---
+def get_game_status_display(row):
+    """Détermine le libellé du statut / résultat du match (Joué vs Non Joué)."""
+    away = row.get('away_team', '')
+    home = row.get('home_team', '')
+    
+    home_score = row.get('home_score')
+    away_score = row.get('away_score')
+    
+    # Vérification si le score est renseigné (match joué ou en cours)
+    if pd.notnull(home_score) and pd.notnull(away_score):
+        h_score = int(home_score)
+        a_score = int(away_score)
+        
+        # Statut du match (ex: 'CLOSED', 'FINAL', etc. selon la source)
+        game_status = str(row.get('status', '')).upper()
+        if 'FINAL' in game_status or 'CLOSED' in game_status or pd.notnull(row.get('result')):
+            return f"🏁 Terminé ({away} {a_score} - {h_score} {home})"
+        else:
+            return f"🔴 En cours ({away} {a_score} - {h_score} {home})"
+            
+    # Si le match n'a pas encore eu lieu
+    gametime = row.get('gametime')
+    gdate = row.get('gameday') or row.get('game_date')
+    
+    if pd.notnull(gametime) and str(gametime) != "nan":
+        return f"🕒 A venir ({gdate} {gametime})"
+    elif pd.notnull(gdate) and str(gdate) != "nan":
+        return f"🕒 A venir ({gdate})"
+    
+    return "🕒 Non joué"
+
+
 # --- PRÉPARATION DES MATCHUPS 2026 ---
 if not week_schedule.empty and 'home_team' in week_schedule.columns and 'away_team' in week_schedule.columns:
-    home_teams = week_schedule[['home_team', 'away_team']].rename(columns={'home_team': 'team', 'away_team': 'opponent_team'})
-    away_teams = week_schedule[['away_team', 'home_team']].rename(columns={'away_team': 'team', 'home_team': 'opponent_team'})
+    # Applique la logique de calcul du statut de chaque rencontre
+    week_schedule['Game_Status_Info'] = week_schedule.apply(get_game_status_display, axis=1)
+
+    home_teams = week_schedule[['home_team', 'away_team', 'Game_Status_Info']].rename(
+        columns={'home_team': 'team', 'away_team': 'opponent_team'}
+    )
+    away_teams = week_schedule[['away_team', 'home_team', 'Game_Status_Info']].rename(
+        columns={'away_team': 'team', 'home_team': 'opponent_team'}
+    )
     matchups_2026 = pd.concat([home_teams, away_teams])
 else:
-    matchups_2026 = pd.DataFrame(columns=['team', 'opponent_team'])
+    matchups_2026 = pd.DataFrame(columns=['team', 'opponent_team', 'Game_Status_Info'])
 
 df_merged = pd.merge(roster_2026, matchups_2026, on='team', how='inner') if not matchups_2026.empty else roster_2026.copy()
 
@@ -149,18 +180,14 @@ else:
     df_merged['sleeper_status'] = None
 
 
-
-
-
-# --- FORMATAGE DYNAMIQUE DU STATUT ---
+# --- FORMATAGE DYNAMIQUE DU STATUT JOUEUR ---
 def format_status(row):
     sleeper_stat = str(row['sleeper_status']).upper() if pd.notnull(row.get('sleeper_status')) else ""
     rep_stat = str(row['report_status']).upper() if pd.notnull(row.get('report_status')) else ""
 
-    if sleeper_stat=="NA":
+    if sleeper_stat == "NA":
         return "🛑 NA"
         
-    # Prise en compte prioritaire de Sleeper (Temps réel)
     if "DNR" in sleeper_stat or "DID NOT REPORT" in sleeper_stat:
         return "🚫 DNR"
     elif "PUP" in sleeper_stat:
@@ -228,13 +255,14 @@ if not res_df.empty:
     col_player_adj = f'Moy. Ajustée ({base_year})'
     name_col = 'player_name_x' if 'player_name_x' in res_df.columns else ('player_name' if 'player_name' in res_df.columns else 'Joueur')
     
-    cols_display = [c for c in [name_col, 'position', 'Statut', 'team', 'opponent_team', m_avg, m_adj, m_l3, def_avg, def_rank, 'Mismatch Alert'] if c in res_df.columns]
+    cols_display = [c for c in [name_col, 'position', 'Statut', 'team', 'opponent_team', 'Game_Status_Info', m_avg, m_adj, m_l3, def_avg, def_rank, 'Mismatch Alert'] if c in res_df.columns]
 
     res_df = res_df[cols_display].rename(columns={
         name_col: 'Joueur',
         'position': 'Pos',
         'team': 'Équipe',
         'opponent_team': 'Adversaire',
+        'Game_Status_Info': 'Match Status',
         m_avg: col_player_avg,
         m_adj: col_player_adj,
         m_l3: 'Derniers Matchs',
@@ -244,40 +272,37 @@ if not res_df.empty:
     })
 
     # --- LOGIQUE DYNAMIQUE DE CASCADE DES BLESSURES ---
-sort_col = col_player_adj if col_player_adj in res_df.columns else col_player_avg
+    sort_col = col_player_adj if col_player_adj in res_df.columns else col_player_avg
 
-if sort_col in res_df.columns and 'Équipe' in res_df.columns:
-    # 1. Tri des joueurs du meilleur au moins bon
-    res_df = res_df.sort_values(by=sort_col, ascending=False)
-    
-    # 2. Identification des inactifs (Out, IR, PUP, NA, Exempt, etc.)
-    res_df['is_inactive'] = res_df['Statut'].ne("🟢 Dispo")
-    
-    # 3. Compte cumulatif des joueurs DISPONIBLES uniquement (0 pour les inactifs)
-    res_df['available_count'] = (~res_df['is_inactive']).astype(int)
-    res_df['cum_available'] = res_df.groupby('Équipe')['available_count'].cumsum()
-    
-    # 4. Conservation des joueurs :
-    # - Si le joueur est DISPONIBLE : on le garde si son rang de dispo <= limite (ex: <= 2)
-    # - Si le joueur est INACTIF : on le garde SEULEMENT S'IL EST ARRIVÉ AVANT d'atteindre la limite de disponibles
-    res_df = res_df[
-        (~res_df['is_inactive'] & (res_df['cum_available'] <= max_players_per_team)) |
-        (res_df['is_inactive'] & (res_df['cum_available'] < max_players_per_team))
-    ]
-    
-    # Nettoyage des colonnes de calcul et re-tri
-    res_df = res_df.drop(columns=['is_inactive', 'available_count', 'cum_available'])
-    res_df = res_df.sort_values(by=sort_col, ascending=False)
+    if sort_col in res_df.columns and 'Équipe' in res_df.columns:
+        # 1. Tri des joueurs du meilleur au moins bon
+        res_df = res_df.sort_values(by=sort_col, ascending=False)
+        
+        # 2. Identification des inactifs
+        res_df['is_inactive'] = res_df['Statut'].ne("🟢 Dispo")
+        
+        # 3. Compte cumulatif des joueurs DISPONIBLES uniquement
+        res_df['available_count'] = (~res_df['is_inactive']).astype(int)
+        res_df['cum_available'] = res_df.groupby('Équipe')['available_count'].cumsum()
+        
+        # 4. Conservation des joueurs selon la limite
+        res_df = res_df[
+            (~res_df['is_inactive'] & (res_df['cum_available'] <= max_players_per_team)) |
+            (res_df['is_inactive'] & (res_df['cum_available'] < max_players_per_team))
+        ]
+        
+        # Nettoyage des colonnes de calcul et re-tri
+        res_df = res_df.drop(columns=['is_inactive', 'available_count', 'cum_available'])
+        res_df = res_df.sort_values(by=sort_col, ascending=False)
 
+        res_df = res_df.reset_index(drop=True)
+        res_df.index = res_df.index + 1
 
-    res_df = res_df.reset_index(drop=True)
-    res_df.index = res_df.index + 1
+        # Affichage
+        title_suffix = f" — {selected_game}" if selected_game != "Toutes les rencontres" else ""
+        st.subheader(f"Matchups Semaine {selected_week}{title_suffix}")
+        st.caption(f"🎯 **Critère sélectionné :** {selected_criterion} | Max. {max_players_per_team} {target_position} actif(s) par équipe")
 
-    # Affichage
-    title_suffix = f" — {selected_game}" if selected_game != "Toutes les rencontres" else ""
-    st.subheader(f"Matchups Semaine {selected_week}{title_suffix}")
-    st.caption(f"🎯 **Critère sélectionné :** {selected_criterion} | Max. {max_players_per_team} {target_position} actif(s) par équipe")
-
-    st.dataframe(res_df, width="stretch")
+        st.dataframe(res_df, width="stretch")
 else:
     st.warning("Aucune donnée ou aucun mismatch correspondant trouvé pour ce critère et ces filtres.")
