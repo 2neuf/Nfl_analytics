@@ -30,7 +30,6 @@ def get_dashboard_data():
 with st.spinner("Chargement des données NFL en cours..."):
     players_df, schedule_2026, roster_2026, injuries_df, sleeper_df, def_df, players_2026_df, def_2026_df, depth_charts, base_year, team_scoring_2025, team_scoring_2026 = get_dashboard_data()
 
-# --- CALCUL AUTOMATIQUE DE LA SEMAINE EN COURS ---
 current_week = get_current_nfl_week(schedule_2026)
 
 st.info(f"💡 Données de référence : saison **{base_year}** | 📅 **Semaine NFL courante (auto-détectée) : Semaine {current_week}**")
@@ -126,8 +125,9 @@ with tab_players:
         p_2026_avg, def_2026_avg, def_2026_rank = "pass_yds_avg_2026", "pass_yds_allowed_pg_2026", "pass_def_rank_2026"
 
     if not players_2026_df.empty and 'player_id' in df_merged.columns:
-        df_merged = pd.merge(df_merged, players_2026_df[['player_id', p_2026_avg]], on='player_id', how='left')
+        df_merged = pd.merge(df_merged, players_2026_df[['player_id', 'games_played_2026', p_2026_avg]], on='player_id', how='left')
     else:
+        df_merged['games_played_2026'] = None
         df_merged[p_2026_avg] = None
 
     if not def_2026_df.empty and 'opponent_team' in df_merged.columns and 'position' in df_merged.columns:
@@ -214,9 +214,9 @@ with tab_players:
         if filter_advantage == "🔥 Gros avantages uniquement (OFF & DEF)":
             res_df = res_df[res_df['Mismatch Alert'].isin(["🔥 Gros avantage OFF", "🔒 Gros avantage DEF"])]
 
-        for col in [m_avg, p_2026_avg, m_adj, m_l3, def_avg, def_2026_avg, def_rank, def_2026_rank]:
+        for col in [m_avg, p_2026_avg, m_adj, m_l3, def_avg, def_2026_avg, def_rank, def_2026_rank, 'games_played_2025', 'games_played_2026']:
             if col in res_df.columns:
-                res_df[col] = pd.to_numeric(res_df[col], errors='coerce').round(0).astype("Int64")
+                res_df[col] = pd.to_numeric(res_df[col], errors='coerce').fillna(0).round(0).astype("Int64")
 
         col_player_avg = f'Moy. Brut ({base_year})'
         col_player_adj = f'Moy. Ajustée ({base_year})'
@@ -224,7 +224,8 @@ with tab_players:
         
         cols_display = [c for c in [
             name_col, 'position', 'Statut', 'team', 'opponent_team', 
-            m_avg, p_2026_avg, m_adj, m_l3, 
+            'games_played_2025', m_avg, m_adj, m_l3, 
+            'games_played_2026', p_2026_avg, 
             def_avg, def_2026_avg, def_rank, def_2026_rank, 'Mismatch Alert'
         ] if c in res_df.columns]
 
@@ -233,10 +234,12 @@ with tab_players:
             'position': 'Pos',
             'team': 'Équipe',
             'opponent_team': 'Adversaire',
+            'games_played_2025': f'MJ {base_year}',
             m_avg: col_player_avg,
-            p_2026_avg: 'Moy. Brut 2026',
             m_adj: col_player_adj,
             m_l3: 'Derniers Matchs',
+            'games_played_2026': 'MJ 2026',
+            p_2026_avg: 'Moy. Brut 2026',
             def_avg: f'Yards Concédés/M aux {target_position} ({base_year})',
             def_2026_avg: 'Yards Concédés/M 2026',
             def_rank: f'Rang Déf. vs {target_position} ({base_year})',
@@ -392,15 +395,26 @@ with tab_injuries:
 
     df_roster_full = roster_2026[roster_2026['team'].isin(teams_playing_this_week)].copy()
 
+    # Jointure Depth Charts
     if not depth_charts.empty:
         if 'gsis_id' in depth_charts.columns and 'player_id' not in depth_charts.columns:
             depth_charts['player_id'] = depth_charts['gsis_id']
-        cols_depth = [c for c in ['player_id', 'depth_team', 'position'] if c in depth_charts.columns]
-        df_roster_full = pd.merge(df_roster_full, depth_charts[cols_depth].drop_duplicates(subset=['player_id']), on='player_id', how='left')
-    
+        
+        # fallback sur pos_rank / depth_team
+        depth_col = 'depth_team' if 'depth_team' in depth_charts.columns else ('pos_rank' if 'pos_rank' in depth_charts.columns else None)
+        
+        if depth_col and 'player_id' in depth_charts.columns:
+            df_roster_full = pd.merge(
+                df_roster_full, 
+                depth_charts[['player_id', depth_col]].drop_duplicates(subset=['player_id']).rename(columns={depth_col: 'depth_team'}), 
+                on='player_id', 
+                how='left'
+            )
+
     if 'depth_team' not in df_roster_full.columns:
         df_roster_full['depth_team'] = None
 
+    # Jointure Rapport de blessure officiel (NFL)
     if not injuries_df.empty and 'week' in injuries_df.columns:
         inj_w = injuries_df[injuries_df['week'] == current_week]
         inj_k = 'player_id' if ('player_id' in df_roster_full.columns and 'player_id' in inj_w.columns) else 'player_name'
@@ -409,10 +423,27 @@ with tab_injuries:
     else:
         df_roster_full['report_status'] = None
 
-    if not sleeper_df.empty and 'gsis_id' in sleeper_df.columns and 'player_id' in df_roster_full.columns:
-        df_roster_full = pd.merge(df_roster_full, sleeper_df[['gsis_id', 'sleeper_status']], left_on='player_id', right_on='gsis_id', how='left')
+    # Jointure Sleeper Status
+    if not sleeper_df.empty:
+        if 'player_id' in df_roster_full.columns and 'gsis_id' in sleeper_df.columns:
+            df_roster_full = pd.merge(df_roster_full, sleeper_df[['gsis_id', 'sleeper_status']], left_on='player_id', right_on='gsis_id', how='left')
+        elif 'player_name' in df_roster_full.columns and 'player_name' in sleeper_df.columns:
+            df_roster_full = pd.merge(df_roster_full, sleeper_df[['player_name', 'sleeper_status']], on='player_name', how='left')
     else:
         df_roster_full['sleeper_status'] = None
+
+    # Harmonisation et remplissage des trous
+    def get_display_medical_status(row):
+        rep = str(row['report_status']).strip() if pd.notnull(row.get('report_status')) and str(row.get('report_status')).lower() != 'none' else ""
+        slp = str(row['sleeper_status']).strip() if pd.notnull(row.get('sleeper_status')) and str(row.get('sleeper_status')).lower() != 'none' else ""
+        
+        if rep:
+            return rep.upper()
+        if slp:
+            return slp.upper()
+        return "DISPO"
+
+    df_roster_full['Statut Médical'] = df_roster_full.apply(get_display_medical_status, axis=1)
 
     slp_series = df_roster_full['sleeper_status'].astype(str).str.upper()
     rep_series = df_roster_full['report_status'].astype(str).str.upper()
@@ -438,7 +469,7 @@ with tab_injuries:
     def get_fast_replacement(row):
         team = row['team']
         pos = row['position']
-        curr_depth = row['depth_team'] if pd.notnull(row['depth_team']) else 1
+        curr_depth = row['depth_team'] if pd.notnull(row['depth_team']) and str(row['depth_team']).isdigit() else 1
 
         cands = available_players[
             (available_players['team'] == team) & 
@@ -448,7 +479,7 @@ with tab_injuries:
         if cands.empty:
             return "Aucun dispo"
 
-        valid_depths = cands[cands['depth_team'] > curr_depth]
+        valid_depths = cands[cands['depth_team'] > curr_depth] if 'depth_team' in cands.columns else pd.DataFrame()
         if not valid_depths.empty:
             next_p = valid_depths.sort_values(by='depth_team').iloc[0]
         else:
@@ -463,7 +494,7 @@ with tab_injuries:
         df_roster_full.loc[injured_mask, 'Remplaçant Proposé'] = df_roster_full[injured_mask].apply(get_fast_replacement, axis=1)
 
     p_name_col = 'player_name' if 'player_name' in df_roster_full.columns else 'full_name'
-    display_cols = [c for c in [p_name_col, 'position', 'team', 'depth_team', 'report_status', 'Remplaçant Proposé'] if c in df_roster_full.columns]
+    display_cols = [c for c in [p_name_col, 'position', 'team', 'depth_team', 'Statut Médical', 'Remplaçant Proposé'] if c in df_roster_full.columns]
 
     def render_injury_table(title, cat_code, default_msg):
         st.subheader(title)
@@ -473,8 +504,7 @@ with tab_injuries:
                 p_name_col: 'Nom du Joueur',
                 'position': 'Poste',
                 'team': 'Équipe',
-                'depth_team': 'Ordre Chart',
-                'report_status': 'Statut Médical'
+                'depth_team': 'Ordre Chart'
             })
             st.dataframe(df_renamed.reset_index(drop=True), width="stretch")
         else:
