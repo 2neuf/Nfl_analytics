@@ -237,3 +237,55 @@ def calculate_2026_defense_by_position(df_players_2026):
     def_2026['pass_def_rank_2026'] = def_2026.groupby('position')['pass_yds_allowed_pg_2026'].rank(ascending=True)
 
     return def_2026
+
+
+def calculate_team_scoring_stats():
+    """Calcule les statistiques de points marqués et concédés par équipe (saisons 2025 et 2026, Domicile/Extérieur)."""
+    try:
+        sched_2025 = nfl.load_schedules(seasons=[2025]).to_pandas()
+        sched_2025 = sched_2025[sched_2025['game_type'] == 'REG'] if 'game_type' in sched_2025.columns else sched_2025
+    except Exception:
+        sched_2025 = pd.DataFrame()
+
+    try:
+        sched_2026 = nfl.load_schedules(seasons=[2026]).to_pandas()
+        sched_2026 = sched_2026[sched_2026['game_type'] == 'REG'] if 'game_type' in sched_2026.columns else sched_2026
+    except Exception:
+        sched_2026 = pd.DataFrame()
+
+    def process_season_scores(sched_df):
+        if sched_df.empty or 'home_score' not in sched_df.columns:
+            return pd.DataFrame()
+        
+        # Ne conserver que les matchs joués
+        df = sched_df.dropna(subset=['home_score', 'away_score']).copy()
+        if df.empty:
+            return pd.DataFrame()
+
+        home_df = df[['home_team', 'home_score', 'away_score']].rename(
+            columns={'home_team': 'team', 'home_score': 'pts_scored', 'away_score': 'pts_allowed'}
+        )
+        home_df['is_home'] = True
+
+        away_df = df[['away_team', 'away_score', 'home_score']].rename(
+            columns={'away_team': 'team', 'away_score': 'pts_scored', 'home_score': 'pts_allowed'}
+        )
+        away_df['is_home'] = False
+
+        combined = pd.concat([home_df, away_df], ignore_index=True)
+
+        stats = combined.groupby('team').agg(
+            score_avg=('pts_scored', 'mean'),
+            score_home=('pts_scored', lambda x: x[combined.loc[x.index, 'is_home']].mean()),
+            score_away=('pts_scored', lambda x: x[~combined.loc[x.index, 'is_home']].mean()),
+            allowed_avg=('pts_allowed', 'mean'),
+            allowed_home=('pts_allowed', lambda x: x[combined.loc[x.index, 'is_home']].mean()),
+            allowed_away=('pts_allowed', lambda x: x[~combined.loc[x.index, 'is_home']].mean()),
+        ).reset_index()
+
+        return stats
+
+    stats_2025 = process_season_scores(sched_2025)
+    stats_2026 = process_season_scores(sched_2026)
+
+    return stats_2025, stats_2026
