@@ -390,13 +390,22 @@ with tab_injuries:
     with col_i_week:
         selected_inj_week = st.selectbox("Semaine NFL", options=available_weeks, index=0, key="week_injuries")
 
+    # --- RESTRICTION À LA SEMAINE EN COURS ---
+    week_inj_schedule = schedule_2026[schedule_2026['week'] == selected_inj_week] if 'week' in schedule_2026.columns else schedule_2026
+    
+    if not week_inj_schedule.empty and 'home_team' in week_inj_schedule.columns and 'away_team' in week_inj_schedule.columns:
+        teams_playing_this_week = set(week_inj_schedule['home_team'].dropna()).union(set(week_inj_schedule['away_team'].dropna()))
+    else:
+        teams_playing_this_week = set(roster_2026['team'].dropna().unique()) if 'team' in roster_2026.columns else set()
+
     with col_i_team:
-        all_teams = sorted(roster_2026['team'].dropna().unique()) if 'team' in roster_2026.columns else []
-        selected_inj_team = st.selectbox("Équipe", options=["Toutes les équipes"] + all_teams, key="team_injuries")
+        available_teams_week = sorted(list(teams_playing_this_week))
+        selected_inj_team = st.selectbox("Équipe", options=["Toutes les équipes de la semaine"] + available_teams_week, key="team_injuries")
 
     st.markdown("---")
 
-    df_roster_full = roster_2026.copy()
+    # Filtrage initial du roster : uniquement les équipes qui jouent cette semaine
+    df_roster_full = roster_2026[roster_2026['team'].isin(teams_playing_this_week)].copy()
 
     # Fusion des Depth Charts
     if not depth_charts.empty:
@@ -408,7 +417,7 @@ with tab_injuries:
     if 'depth_team' not in df_roster_full.columns:
         df_roster_full['depth_team'] = None
 
-    # Fusion des blessures
+    # Fusion des blessures de la semaine sélectionnée
     if not injuries_df.empty and 'week' in injuries_df.columns:
         inj_w = injuries_df[injuries_df['week'] == selected_inj_week]
         inj_k = 'player_id' if ('player_id' in df_roster_full.columns and 'player_id' in inj_w.columns) else 'player_name'
@@ -423,7 +432,7 @@ with tab_injuries:
     else:
         df_roster_full['sleeper_status'] = None
 
-    # Normalisation rapide des statuts
+    # Normalisation des statuts
     slp_series = df_roster_full['sleeper_status'].astype(str).str.upper()
     rep_series = df_roster_full['report_status'].astype(str).str.upper()
 
@@ -440,11 +449,11 @@ with tab_injuries:
     df_roster_full.loc[is_doubtful, 'Status_Category'] = "DOUBTFUL"
     df_roster_full.loc[is_out, 'Status_Category'] = "OUT_IR_NA"
 
-    # Filtrage par équipe AVANT le calcul des remplaçants (gain massif de perf)
-    if selected_inj_team != "Toutes les équipes":
+    # Filtrage par équipe si une équipe spécifique est sélectionnée
+    if selected_inj_team != "Toutes les équipes de la semaine":
         df_roster_full = df_roster_full[df_roster_full['team'] == selected_inj_team].copy()
 
-    # Isolation des joueurs blessés et disponibles
+    # Isolement des joueurs disponibles pour le remplacement
     available_players = df_roster_full[df_roster_full['Status_Category'] == "AVAILABLE"]
 
     def get_fast_replacement(row):
@@ -460,7 +469,6 @@ with tab_injuries:
         if cands.empty:
             return "Aucun dispo"
 
-        # Sélection du prochain disponible sur le depth chart
         valid_depths = cands[cands['depth_team'] > curr_depth]
         if not valid_depths.empty:
             next_p = valid_depths.sort_values(by='depth_team').iloc[0]
@@ -470,7 +478,7 @@ with tab_injuries:
         d_str = f" (Depth {int(next_p['depth_team'])})" if pd.notnull(next_p.get('depth_team')) else ""
         return f"{next_p.get('player_name', next_p.get('full_name', 'Inconnu'))}{d_str}"
 
-    # Ne calculer le remplaçant QUE sur les joueurs non disponibles
+    # Calcul restreint aux seuls joueurs indisponibles
     injured_mask = df_roster_full['Status_Category'] != "AVAILABLE"
     df_roster_full['Remplaçant Proposé'] = "-"
     if injured_mask.any():
@@ -479,7 +487,7 @@ with tab_injuries:
     p_name_col = 'player_name' if 'player_name' in df_roster_full.columns else 'full_name'
     display_cols = [c for c in [p_name_col, 'position', 'team', 'depth_team', 'report_status', 'Remplaçant Proposé'] if c in df_roster_full.columns]
 
-    # --- TABLEAUX ---
+    # Render des 3 tableaux
     def render_injury_table(title, cat_code, default_msg):
         st.subheader(title)
         df_sub = df_roster_full[df_roster_full['Status_Category'] == cat_code]
@@ -491,7 +499,7 @@ with tab_injuries:
                 'depth_team': 'Ordre Chart',
                 'report_status': 'Statut Médical'
             })
-            st.dataframe(df_renamed.reset_index(drop=True), use_container_width=True)
+            st.dataframe(df_renamed.reset_index(drop=True), width="stretch")
         else:
             st.info(default_msg)
 
