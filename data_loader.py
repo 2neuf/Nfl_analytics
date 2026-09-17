@@ -36,7 +36,7 @@ def fetch_sleeper_statuses():
 
 
 def load_data_for_2026_season():
-    """Charge les stats, rosters, calendriers, snap counts et blessures via nflreadpy."""
+    """Charge les stats, rosters, calendriers, snap counts, blessures et depth charts via nflreadpy."""
     try:
         df_players_base = nfl.load_player_stats(seasons=[2025], summary_level="week").to_pandas()
         base_year = 2025
@@ -90,6 +90,15 @@ def load_data_for_2026_season():
     except Exception:
         injuries_2026 = pd.DataFrame()
 
+    # --- CHARGEMENT DES DEPTH CHARTS ---
+    try:
+        depth_charts = nfl.load_depth_charts(seasons=[2026]).to_pandas()
+    except Exception:
+        try:
+            depth_charts = nfl.load_depth_charts(seasons=[2025]).to_pandas()
+        except Exception:
+            depth_charts = pd.DataFrame()
+
     sleeper_injuries = fetch_sleeper_statuses()
 
     # --- STATS JOUEURS 2026 ---
@@ -100,7 +109,7 @@ def load_data_for_2026_season():
     except Exception:
         df_players_2026 = pd.DataFrame()
 
-    return df_players_base, schedule_2026, roster_2026, injuries_2026, sleeper_injuries, df_players_2026, base_year
+    return df_players_base, schedule_2026, roster_2026, injuries_2026, sleeper_injuries, df_players_2026, depth_charts, base_year
 
 
 def calculate_2025_player_baselines(df_players_base, def_pos_stats):
@@ -256,8 +265,7 @@ def calculate_team_scoring_stats():
     def process_season_scores(sched_df):
         if sched_df.empty or 'home_score' not in sched_df.columns:
             return pd.DataFrame()
-        
-        # Ne conserver que les matchs joués
+
         df = sched_df.dropna(subset=['home_score', 'away_score']).copy()
         if df.empty:
             return pd.DataFrame()
