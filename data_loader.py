@@ -3,6 +3,34 @@ import pandas as pd
 import numpy as np
 import requests
 import streamlit as st
+from datetime import datetime
+
+def get_current_nfl_week(schedule_df):
+    """Détermine automatiquement la semaine NFL courante à partir de la date du jour."""
+    if schedule_df is None or schedule_df.empty:
+        return 1
+
+    today = datetime.now().date()
+    
+    # Conversion de la colonne date si nécessaire
+    df_sched = schedule_df.copy()
+    if 'gameday' in df_sched.columns:
+        df_sched['game_date'] = pd.to_datetime(df_sched['gameday']).dt.date
+    elif 'game_date' in df_sched.columns:
+        df_sched['game_date'] = pd.to_datetime(df_sched['game_date']).dt.date
+    else:
+        return 1
+
+    # Trouver le dernier jour de chaque semaine (mardi à 00h / fin des Monday Night Games)
+    week_end_dates = df_sched.groupby('week')['game_date'].max().reset_index()
+    week_end_dates = week_end_dates.sort_values(by='week')
+
+    for _, row in week_end_dates.iterrows():
+        if today <= row['game_date']:
+            return int(row['week'])
+
+    # Si la saison est terminée ou trop avancée, renvoyer la dernière semaine disponible
+    return int(week_end_dates['week'].max())
 
 @st.cache_data(ttl=900)
 def fetch_sleeper_statuses():
