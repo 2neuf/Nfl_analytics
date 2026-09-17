@@ -391,17 +391,16 @@ with tab_injuries:
         selected_inj_week = st.selectbox("Semaine NFL", options=available_weeks, index=0, key="week_injuries")
 
     with col_i_team:
-        all_teams = sorted(roster_2026['team'].unique()) if 'team' in roster_2026.columns else []
+        all_teams = sorted(roster_2026['team'].dropna().unique()) if 'team' in roster_2026.columns else []
         selected_inj_team = st.selectbox("Équipe", options=["Toutes les équipes"] + all_teams, key="team_injuries")
 
     st.markdown("---")
 
-    # Utilisation des rosters complets (incluant OL et défense)
     df_roster_full = roster_2026.copy()
 
-    # Fusion avec les Depth Charts si disponibles
+    # Fusion des Depth Charts
     if not depth_charts.empty:
-        if 'gsis_id' in depth_charts.columns:
+        if 'gsis_id' in depth_charts.columns and 'player_id' not in depth_charts.columns:
             depth_charts['player_id'] = depth_charts['gsis_id']
         cols_depth = [c for c in ['player_id', 'depth_team', 'position'] if c in depth_charts.columns]
         df_roster_full = pd.merge(df_roster_full, depth_charts[cols_depth].drop_duplicates(subset=['player_id']), on='player_id', how='left')
@@ -409,113 +408,93 @@ with tab_injuries:
     if 'depth_team' not in df_roster_full.columns:
         df_roster_full['depth_team'] = None
 
-    # Fusion avec le rapport des blessures nflreadpy
+    # Fusion des blessures
     if not injuries_df.empty and 'week' in injuries_df.columns:
         inj_w = injuries_df[injuries_df['week'] == selected_inj_week]
         inj_k = 'player_id' if ('player_id' in df_roster_full.columns and 'player_id' in inj_w.columns) else 'player_name'
-        cols_inj_w = [inj_k, 'report_status', 'practice_status'] if 'report_status' in inj_w.columns else [inj_k]
+        cols_inj_w = [inj_k, 'report_status'] if 'report_status' in inj_w.columns else [inj_k]
         df_roster_full = pd.merge(df_roster_full, inj_w[cols_inj_w], on=inj_k, how='left')
     else:
         df_roster_full['report_status'] = None
 
-    # Fusion avec Sleeper (en option si match possible)
+    # Fusion Sleeper
     if not sleeper_df.empty and 'gsis_id' in sleeper_df.columns and 'player_id' in df_roster_full.columns:
         df_roster_full = pd.merge(df_roster_full, sleeper_df[['gsis_id', 'sleeper_status']], left_on='player_id', right_on='gsis_id', how='left')
     else:
         df_roster_full['sleeper_status'] = None
 
-    # Classification du Statut Global
-    def categorize_status(row):
-        slp = str(row['sleeper_status']).upper() if pd.notnull(row.get('sleeper_status')) else ""
-        rep = str(row['report_status']).upper() if pd.notnull(row.get('report_status')) else ""
+    # Normalisation rapide des statuts
+    slp_series = df_roster_full['sleeper_status'].astype(str).str.upper()
+    rep_series = df_roster_full['report_status'].astype(str).str.upper()
 
-        if slp in ["NA", "SUS"] or "DNR" in slp or "PUP" in slp or "IR" in slp or "OUT" in slp or "OUT" in rep or "PUP" in rep or "IR" in rep:
-            return "OUT_IR_NA"
-        elif "DOUBTFUL" in slp or "DOUBTFUL" in rep:
-            return "DOUBTFUL"
-        elif "QUESTIONABLE" in slp or "QUESTIONABLE" in rep:
-            return "QUESTIONABLE"
-        return "AVAILABLE"
+    is_out = (
+        slp_series.isin(["NA", "SUS"]) | 
+        slp_series.str.contains("DNR|PUP|IR|OUT", na=False) | 
+        rep_series.str.contains("OUT|PUP|IR", na=False)
+    )
+    is_doubtful = slp_series.str.contains("DOUBTFUL", na=False) | rep_series.str.contains("DOUBTFUL", na=False)
+    is_quest = slp_series.str.contains("QUESTIONABLE", na=False) | rep_series.str.contains("QUESTIONABLE", na=False)
 
-    df_roster_full['Status_Category'] = df_roster_full.apply(categorize_status, axis=1)
+    df_roster_full['Status_Category'] = "AVAILABLE"
+    df_roster_full.loc[is_quest, 'Status_Category'] = "QUESTIONABLE"
+    df_roster_full.loc[is_doubtful, 'Status_Category'] = "DOUBTFUL"
+    df_roster_full.loc[is_out, 'Status_Category'] = "OUT_IR_NA"
 
-    # Fonction pour trouver le remplaçant direct
-    def find_replacement(row, roster_df):
+    # Filtrage par équipe AVANT le calcul des remplaçants (gain massif de perf)
+    if selected_inj_team != "Toutes les équipes":
+        df_roster_full = df_roster_full[df_roster_full['team'] == selected_inj_team].copy()
+
+    # Isolation des joueurs blessés et disponibles
+    available_players = df_roster_full[df_roster_full['Status_Category'] == "AVAILABLE"]
+
+    def get_fast_replacement(row):
         team = row['team']
         pos = row['position']
         curr_depth = row['depth_team'] if pd.notnull(row['depth_team']) else 1
 
-        candidates = roster_df[
-            (roster_df['team'] == team) & 
-            (roster_df['position'] == pos) & 
-            (roster_df['Status_Category'] == "AVAILABLE")
-        ].copy()
+        cands = available_players[
+            (available_players['team'] == team) & 
+            (available_players['position'] == pos)
+        ]
 
-        if candidates.empty:
-            return "Aucun remplaçant disponible"
+        if cands.empty:
+            return "Aucun dispo"
 
-        if pd.notnull(curr_depth):
-            candidates['depth_diff'] = candidates['depth_team'].apply(lambda d: d - curr_depth if pd.notnull(d) and d > curr_depth else 99)
-            candidates = candidates.sort_values(by='depth_diff')
+        # Sélection du prochain disponible sur le depth chart
+        valid_depths = cands[cands['depth_team'] > curr_depth]
+        if not valid_depths.empty:
+            next_p = valid_depths.sort_values(by='depth_team').iloc[0]
+        else:
+            next_p = cands.iloc[0]
 
-        next_player = candidates.iloc[0]
-        depth_str = f" (Depth {int(next_player['depth_team'])})" if pd.notnull(next_player.get('depth_team')) else ""
-        return f"{next_player['player_name']}{depth_str}"
+        d_str = f" (Depth {int(next_p['depth_team'])})" if pd.notnull(next_p.get('depth_team')) else ""
+        return f"{next_p.get('player_name', next_p.get('full_name', 'Inconnu'))}{d_str}"
 
-    df_roster_full['Remplaçant Proposé'] = df_roster_full.apply(lambda r: find_replacement(r, df_roster_full), axis=1)
+    # Ne calculer le remplaçant QUE sur les joueurs non disponibles
+    injured_mask = df_roster_full['Status_Category'] != "AVAILABLE"
+    df_roster_full['Remplaçant Proposé'] = "-"
+    if injured_mask.any():
+        df_roster_full.loc[injured_mask, 'Remplaçant Proposé'] = df_roster_full[injured_mask].apply(get_fast_replacement, axis=1)
 
-    # Filtrage par équipe si sélectionnée
-    if selected_inj_team != "Toutes les équipes":
-        df_roster_full = df_roster_full[df_roster_full['team'] == selected_inj_team]
+    p_name_col = 'player_name' if 'player_name' in df_roster_full.columns else 'full_name'
+    display_cols = [c for c in [p_name_col, 'position', 'team', 'depth_team', 'report_status', 'Remplaçant Proposé'] if c in df_roster_full.columns]
 
-    p_name_col = 'player_name_x' if 'player_name_x' in df_roster_full.columns else ('player_name' if 'player_name' in df_roster_full.columns else 'Joueur')
-    
-    display_cols = [p_name_col, 'position', 'team', 'depth_team', 'report_status', 'Remplaçant Proposé']
+    # --- TABLEAUX ---
+    def render_injury_table(title, cat_code, default_msg):
+        st.subheader(title)
+        df_sub = df_roster_full[df_roster_full['Status_Category'] == cat_code]
+        if not df_sub.empty:
+            df_renamed = df_sub[display_cols].rename(columns={
+                p_name_col: 'Nom du Joueur',
+                'position': 'Poste',
+                'team': 'Équipe',
+                'depth_team': 'Ordre Chart',
+                'report_status': 'Statut Médical'
+            })
+            st.dataframe(df_renamed.reset_index(drop=True), use_container_width=True)
+        else:
+            st.info(default_msg)
 
-    # --- TABLEAU 1: OUT / IR / NA ---
-    st.subheader("🛑 Absents Certains (OUT / IR / PUP / NA)")
-    df_out = df_roster_full[df_roster_full['Status_Category'] == "OUT_IR_NA"].copy()
-    if not df_out.empty:
-        df_out = df_out[display_cols].rename(columns={
-            p_name_col: 'Nom du Joueur',
-            'position': 'Poste',
-            'team': 'Équipe',
-            'depth_team': 'Ordre Chart',
-            'report_status': 'Statut Médical',
-            'Remplaçant Proposé': 'Remplaçant Proposé'
-        })
-        st.dataframe(df_out.reset_index(drop=True), width="stretch")
-    else:
-        st.info("Aucun joueur confirmé absent pour cette sélection.")
-
-    # --- TABLEAU 2: DOUBTFUL ---
-    st.subheader("❌ Incertains (DOUBTFUL)")
-    df_doubtful = df_roster_full[df_roster_full['Status_Category'] == "DOUBTFUL"].copy()
-    if not df_doubtful.empty:
-        df_doubtful = df_doubtful[display_cols].rename(columns={
-            p_name_col: 'Nom du Joueur',
-            'position': 'Poste',
-            'team': 'Équipe',
-            'depth_team': 'Ordre Chart',
-            'report_status': 'Statut Médical',
-            'Remplaçant Proposé': 'Remplaçant Proposé'
-        })
-        st.dataframe(df_doubtful.reset_index(drop=True), width="stretch")
-    else:
-        st.info("Aucun joueur doubtful pour cette sélection.")
-
-    # --- TABLEAU 3: QUESTIONABLE ---
-    st.subheader("⚠️ Sous réserve (QUESTIONABLE)")
-    df_questionable = df_roster_full[df_roster_full['Status_Category'] == "QUESTIONABLE"].copy()
-    if not df_questionable.empty:
-        df_questionable = df_questionable[display_cols].rename(columns={
-            p_name_col: 'Nom du Joueur',
-            'position': 'Poste',
-            'team': 'Équipe',
-            'depth_team': 'Ordre Chart',
-            'report_status': 'Statut Médical',
-            'Remplaçant Proposé': 'Remplaçant Proposé'
-        })
-        st.dataframe(df_questionable.reset_index(drop=True), width="stretch")
-    else:
-        st.info("Aucun joueur questionable pour cette sélection.")
+    render_injury_table("🛑 Absents Certains (OUT / IR / PUP / NA)", "OUT_IR_NA", "Aucun joueur confirmé absent pour cette sélection.")
+    render_injury_table("❌ Incertains (DOUBTFUL)", "DOUBTFUL", "Aucun joueur doubtful pour cette sélection.")
+    render_injury_table("⚠️ Sous réserve (QUESTIONABLE)", "QUESTIONABLE", "Aucun joueur questionable pour cette sélection.")
