@@ -11,9 +11,8 @@ def get_current_nfl_week(schedule_df):
         return 1
 
     today = datetime.now().date()
-    
-    # Conversion de la colonne date si nécessaire
     df_sched = schedule_df.copy()
+    
     if 'gameday' in df_sched.columns:
         df_sched['game_date'] = pd.to_datetime(df_sched['gameday']).dt.date
     elif 'game_date' in df_sched.columns:
@@ -21,16 +20,14 @@ def get_current_nfl_week(schedule_df):
     else:
         return 1
 
-    # Trouver le dernier jour de chaque semaine (mardi à 00h / fin des Monday Night Games)
-    week_end_dates = df_sched.groupby('week')['game_date'].max().reset_index()
-    week_end_dates = week_end_dates.sort_values(by='week')
+    week_end_dates = df_sched.groupby('week')['game_date'].max().reset_index().sort_values(by='week')
 
     for _, row in week_end_dates.iterrows():
         if today <= row['game_date']:
             return int(row['week'])
 
-    # Si la saison est terminée ou trop avancée, renvoyer la dernière semaine disponible
     return int(week_end_dates['week'].max())
+
 
 @st.cache_data(ttl=900)
 def fetch_sleeper_statuses():
@@ -64,7 +61,7 @@ def fetch_sleeper_statuses():
 
 
 def load_data_for_2026_season():
-    """Charge les stats, rosters, calendriers, snap counts, blessures et depth charts via nflreadpy."""
+    """Charge l'ensemble des jeux de données via nflreadpy."""
     try:
         df_players_base = nfl.load_player_stats(seasons=[2025], summary_level="week").to_pandas()
         base_year = 2025
@@ -72,7 +69,6 @@ def load_data_for_2026_season():
         df_players_base = nfl.load_player_stats(seasons=[2024], summary_level="week").to_pandas()
         base_year = 2024
 
-    # --- FILTRAGE SAISON RÉGULIÈRE UNIQUE ---
     if 'season_type' in df_players_base.columns:
         df_players_base = df_players_base[df_players_base['season_type'] == 'REG'].copy()
     elif 'week' in df_players_base.columns:
@@ -81,7 +77,7 @@ def load_data_for_2026_season():
     if 'player_name' not in df_players_base.columns and 'player_display_name' in df_players_base.columns:
         df_players_base['player_name'] = df_players_base['player_display_name']
 
-    # --- SNAP COUNTS ---
+    # Snap counts
     try:
         snaps_df = nfl.load_snap_counts(seasons=[base_year]).to_pandas()
         if 'offense_pct' in snaps_df.columns:
@@ -110,7 +106,7 @@ def load_data_for_2026_season():
     if 'full_name' in roster_2026.columns and 'player_name' not in roster_2026.columns:
         roster_2026['player_name'] = roster_2026['full_name']
 
-    # --- CHARGEMENT DES BLESSURES ---
+    # Blessures
     try:
         injuries_2026 = nfl.load_injuries(seasons=[2026]).to_pandas()
         if 'gsis_id' in injuries_2026.columns and 'player_id' not in injuries_2026.columns:
@@ -118,7 +114,7 @@ def load_data_for_2026_season():
     except Exception:
         injuries_2026 = pd.DataFrame()
 
-    # --- CHARGEMENT DES DEPTH CHARTS ---
+    # Depth Charts
     try:
         depth_charts = nfl.load_depth_charts(seasons=[2026]).to_pandas()
     except Exception:
@@ -127,9 +123,15 @@ def load_data_for_2026_season():
         except Exception:
             depth_charts = pd.DataFrame()
 
+    # Uniformisation de la colonne 'depth_team' ou 'pos_rank'
+    if not depth_charts.empty:
+        if 'pos_rank' in depth_charts.columns and 'depth_team' not in depth_charts.columns:
+            depth_charts['depth_team'] = depth_charts['pos_rank']
+        elif 'depth_position' in depth_charts.columns and 'depth_team' not in depth_charts.columns:
+            depth_charts['depth_team'] = depth_charts['depth_position']
+
     sleeper_injuries = fetch_sleeper_statuses()
 
-    # --- STATS JOUEURS 2026 ---
     try:
         df_players_2026 = nfl.load_player_stats(seasons=[2026], summary_level="week").to_pandas()
         if 'season_type' in df_players_2026.columns:
@@ -141,10 +143,11 @@ def load_data_for_2026_season():
 
 
 def calculate_2025_player_baselines(df_players_base, def_pos_stats):
-    """Calcule les moyennes brutes ET les moyennes ajustées par la difficulté des défenses."""
+    """Calcule les moyennes et le nombre de matchs joués pour la saison de référence."""
     df_players_base = df_players_base.sort_values(by=['player_id', 'week'])
 
     player_stats = df_players_base.groupby(['player_id', 'player_name', 'position']).agg(
+        games_played_2025=('week', 'nunique'),
         pass_yds_avg=('passing_yards', 'mean'),
         rush_yds_avg=('rushing_yards', 'mean'),
         rec_yds_avg=('receiving_yards', 'mean'),
@@ -198,7 +201,6 @@ def calculate_2025_player_baselines(df_players_base, def_pos_stats):
 
 
 def calculate_2025_defense_by_position(df_players_base):
-    """Calcule les stats et rankings défensifs de saison régulière par équipe ET par position."""
     if 'opponent_team' not in df_players_base.columns or df_players_base.empty:
         return pd.DataFrame()
 
@@ -229,14 +231,15 @@ def calculate_2025_defense_by_position(df_players_base):
 
 
 def calculate_2026_player_baselines(df_players_2026):
-    """Calcule uniquement la moyenne brute par match pour 2026."""
+    """Calcule la moyenne brute et le nombre de matchs joués pour 2026."""
     if df_players_2026 is None or df_players_2026.empty:
-        return pd.DataFrame(columns=['player_id', 'pass_yds_avg_2026', 'rush_yds_avg_2026', 'rec_yds_avg_2026'])
+        return pd.DataFrame(columns=['player_id', 'games_played_2026', 'pass_yds_avg_2026', 'rush_yds_avg_2026', 'rec_yds_avg_2026'])
 
     if 'player_name' not in df_players_2026.columns and 'player_display_name' in df_players_2026.columns:
         df_players_2026['player_name'] = df_players_2026['player_display_name']
 
     stats_2026 = df_players_2026.groupby('player_id').agg(
+        games_played_2026=('week', 'nunique'),
         pass_yds_avg_2026=('passing_yards', 'mean'),
         rush_yds_avg_2026=('rushing_yards', 'mean'),
         rec_yds_avg_2026=('receiving_yards', 'mean')
@@ -246,7 +249,6 @@ def calculate_2026_player_baselines(df_players_2026):
 
 
 def calculate_2026_defense_by_position(df_players_2026):
-    """Calcule les yards concédés et rangs défensifs pour 2026 uniquement."""
     if df_players_2026 is None or df_players_2026.empty or 'opponent_team' not in df_players_2026.columns:
         return pd.DataFrame()
 
@@ -277,7 +279,6 @@ def calculate_2026_defense_by_position(df_players_2026):
 
 
 def calculate_team_scoring_stats():
-    """Calcule les statistiques de points marqués et concédés par équipe (saisons 2025 et 2026, Domicile/Extérieur)."""
     try:
         sched_2025 = nfl.load_schedules(seasons=[2025]).to_pandas()
         sched_2025 = sched_2025[sched_2025['game_type'] == 'REG'] if 'game_type' in sched_2025.columns else sched_2025
