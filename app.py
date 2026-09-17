@@ -14,7 +14,7 @@ st.title("🏈 NFL Mismatch Finder 2026")
 
 @st.cache_data(ttl=3600)
 def get_dashboard_data():
-    df_base, schedule_2026, roster_2026, injuries_2026, sleeper_df, df_players_2026, base_year = load_data_for_2026_season()
+    df_base, schedule_2026, roster_2026, injuries_2026, sleeper_df, df_players_2026, depth_charts, base_year = load_data_for_2026_season()
     def_pos_stats = calculate_2025_defense_by_position(df_base)
     player_baselines = calculate_2025_player_baselines(df_base, def_pos_stats)
     
@@ -23,14 +23,14 @@ def get_dashboard_data():
     
     team_scoring_2025, team_scoring_2026 = calculate_team_scoring_stats()
     
-    return player_baselines, schedule_2026, roster_2026, injuries_df if 'injuries_df' in locals() else injuries_2026, sleeper_df, def_pos_stats, player_2026_stats, def_2026_stats, base_year, team_scoring_2025, team_scoring_2026
+    return player_baselines, schedule_2026, roster_2026, injuries_2026, sleeper_df, def_pos_stats, player_2026_stats, def_2026_stats, depth_charts, base_year, team_scoring_2025, team_scoring_2026
 
 with st.spinner("Chargement des données NFL en cours..."):
-    players_df, schedule_2026, roster_2026, injuries_df, sleeper_df, def_df, players_2026_df, def_2026_df, base_year, team_scoring_2025, team_scoring_2026 = get_dashboard_data()
+    players_df, schedule_2026, roster_2026, injuries_df, sleeper_df, def_df, players_2026_df, def_2026_df, depth_charts, base_year, team_scoring_2025, team_scoring_2026 = get_dashboard_data()
 
 st.info(f"💡 Données de référence basées sur la saison **{base_year}**.")
 
-tab_players, tab_teams = st.tabs(["🏃 Mismatch Joueurs", "🏈 Mismatch Scoring Équipes"])
+tab_players, tab_teams, tab_injuries = st.tabs(["🏃 Mismatch Joueurs", "🏈 Mismatch Scoring Équipes", "🏥 Infirmier & Profondeur"])
 
 # ==============================================================================
 # TAB 1: MISMATCH JOUEURS
@@ -311,7 +311,6 @@ with tab_teams:
         team_matchups_2026 = team_matchups_2026[team_matchups_2026['team'].isin([away_t, home_t])]
 
     if not team_matchups_2026.empty:
-        # Fusion des données de points marqués de l'équipe
         df_team_res = pd.merge(team_matchups_2026, team_scoring_2025, on='team', how='left')
         
         if not team_scoring_2026.empty:
@@ -319,7 +318,6 @@ with tab_teams:
         else:
             df_team_res['score_avg_2026'] = None
 
-        # Fusion des données de points autorisés par l'adversaire
         if not team_scoring_2025.empty:
             df_team_res = pd.merge(
                 df_team_res, 
@@ -343,7 +341,6 @@ with tab_teams:
         else:
             df_team_res['allowed_avg_2026'] = None
 
-        # Sélection des colonnes spécifiques Home/Away selon le lieu du match
         df_team_res['scoring_venue'] = df_team_res.apply(
             lambda r: r['score_home'] if r['is_home'] else r['score_away'], axis=1
         )
@@ -356,7 +353,6 @@ with tab_teams:
             'allowed_avg', 'allowed_avg_2026', 'allowed_away', 'allowed_home'
         ]
 
-        # Arrondi des colonnes
         for col in cols_team_display[2:]:
             if col in df_team_res.columns:
                 df_team_res[col] = pd.to_numeric(df_team_res[col], errors='coerce').round(1)
@@ -382,3 +378,144 @@ with tab_teams:
         st.dataframe(final_team_df, width="stretch")
     else:
         st.warning("Aucune rencontre trouvée pour cette semaine.")
+
+# ==============================================================================
+# TAB 3: INFIRMERIE & PROFONDEUR
+# ==============================================================================
+with tab_injuries:
+    st.markdown("### ⚙️ Options de filtrage (Infirmerie)")
+
+    col_i_week, col_i_team = st.columns([1, 2.5])
+
+    with col_i_week:
+        selected_inj_week = st.selectbox("Semaine NFL", options=available_weeks, index=0, key="week_injuries")
+
+    with col_i_team:
+        all_teams = sorted(roster_2026['team'].unique()) if 'team' in roster_2026.columns else []
+        selected_inj_team = st.selectbox("Équipe", options=["Toutes les équipes"] + all_teams, key="team_injuries")
+
+    st.markdown("---")
+
+    # Utilisation des rosters complets (incluant OL et défense)
+    df_roster_full = roster_2026.copy()
+
+    # Fusion avec les Depth Charts si disponibles
+    if not depth_charts.empty:
+        if 'gsis_id' in depth_charts.columns:
+            depth_charts['player_id'] = depth_charts['gsis_id']
+        cols_depth = [c for c in ['player_id', 'depth_team', 'position'] if c in depth_charts.columns]
+        df_roster_full = pd.merge(df_roster_full, depth_charts[cols_depth].drop_duplicates(subset=['player_id']), on='player_id', how='left')
+    
+    if 'depth_team' not in df_roster_full.columns:
+        df_roster_full['depth_team'] = None
+
+    # Fusion avec le rapport des blessures nflreadpy
+    if not injuries_df.empty and 'week' in injuries_df.columns:
+        inj_w = injuries_df[injuries_df['week'] == selected_inj_week]
+        inj_k = 'player_id' if ('player_id' in df_roster_full.columns and 'player_id' in inj_w.columns) else 'player_name'
+        cols_inj_w = [inj_k, 'report_status', 'practice_status'] if 'report_status' in inj_w.columns else [inj_k]
+        df_roster_full = pd.merge(df_roster_full, inj_w[cols_inj_w], on=inj_k, how='left')
+    else:
+        df_roster_full['report_status'] = None
+
+    # Fusion avec Sleeper (en option si match possible)
+    if not sleeper_df.empty and 'gsis_id' in sleeper_df.columns and 'player_id' in df_roster_full.columns:
+        df_roster_full = pd.merge(df_roster_full, sleeper_df[['gsis_id', 'sleeper_status']], left_on='player_id', right_on='gsis_id', how='left')
+    else:
+        df_roster_full['sleeper_status'] = None
+
+    # Classification du Statut Global
+    def categorize_status(row):
+        slp = str(row['sleeper_status']).upper() if pd.notnull(row.get('sleeper_status')) else ""
+        rep = str(row['report_status']).upper() if pd.notnull(row.get('report_status')) else ""
+
+        if slp in ["NA", "SUS"] or "DNR" in slp or "PUP" in slp or "IR" in slp or "OUT" in slp or "OUT" in rep or "PUP" in rep or "IR" in rep:
+            return "OUT_IR_NA"
+        elif "DOUBTFUL" in slp or "DOUBTFUL" in rep:
+            return "DOUBTFUL"
+        elif "QUESTIONABLE" in slp or "QUESTIONABLE" in rep:
+            return "QUESTIONABLE"
+        return "AVAILABLE"
+
+    df_roster_full['Status_Category'] = df_roster_full.apply(categorize_status, axis=1)
+
+    # Fonction pour trouver le remplaçant direct
+    def find_replacement(row, roster_df):
+        team = row['team']
+        pos = row['position']
+        curr_depth = row['depth_team'] if pd.notnull(row['depth_team']) else 1
+
+        candidates = roster_df[
+            (roster_df['team'] == team) & 
+            (roster_df['position'] == pos) & 
+            (roster_df['Status_Category'] == "AVAILABLE")
+        ].copy()
+
+        if candidates.empty:
+            return "Aucun remplaçant disponible"
+
+        if pd.notnull(curr_depth):
+            candidates['depth_diff'] = candidates['depth_team'].apply(lambda d: d - curr_depth if pd.notnull(d) and d > curr_depth else 99)
+            candidates = candidates.sort_values(by='depth_diff')
+
+        next_player = candidates.iloc[0]
+        depth_str = f" (Depth {int(next_player['depth_team'])})" if pd.notnull(next_player.get('depth_team')) else ""
+        return f"{next_player['player_name']}{depth_str}"
+
+    df_roster_full['Remplaçant Proposé'] = df_roster_full.apply(lambda r: find_replacement(r, df_roster_full), axis=1)
+
+    # Filtrage par équipe si sélectionnée
+    if selected_inj_team != "Toutes les équipes":
+        df_roster_full = df_roster_full[df_roster_full['team'] == selected_inj_team]
+
+    p_name_col = 'player_name_x' if 'player_name_x' in df_roster_full.columns else ('player_name' if 'player_name' in df_roster_full.columns else 'Joueur')
+    
+    display_cols = [p_name_col, 'position', 'team', 'depth_team', 'report_status', 'Remplaçant Proposé']
+
+    # --- TABLEAU 1: OUT / IR / NA ---
+    st.subheader("🛑 Absents Certains (OUT / IR / PUP / NA)")
+    df_out = df_roster_full[df_roster_full['Status_Category'] == "OUT_IR_NA"].copy()
+    if not df_out.empty:
+        df_out = df_out[display_cols].rename(columns={
+            p_name_col: 'Nom du Joueur',
+            'position': 'Poste',
+            'team': 'Équipe',
+            'depth_team': 'Ordre Chart',
+            'report_status': 'Statut Médical',
+            'Remplaçant Proposé': 'Remplaçant Proposé'
+        })
+        st.dataframe(df_out.reset_index(drop=True), width="stretch")
+    else:
+        st.info("Aucun joueur confirmé absent pour cette sélection.")
+
+    # --- TABLEAU 2: DOUBTFUL ---
+    st.subheader("❌ Incertains (DOUBTFUL)")
+    df_doubtful = df_roster_full[df_roster_full['Status_Category'] == "DOUBTFUL"].copy()
+    if not df_doubtful.empty:
+        df_doubtful = df_doubtful[display_cols].rename(columns={
+            p_name_col: 'Nom du Joueur',
+            'position': 'Poste',
+            'team': 'Équipe',
+            'depth_team': 'Ordre Chart',
+            'report_status': 'Statut Médical',
+            'Remplaçant Proposé': 'Remplaçant Proposé'
+        })
+        st.dataframe(df_doubtful.reset_index(drop=True), width="stretch")
+    else:
+        st.info("Aucun joueur doubtful pour cette sélection.")
+
+    # --- TABLEAU 3: QUESTIONABLE ---
+    st.subheader("⚠️ Sous réserve (QUESTIONABLE)")
+    df_questionable = df_roster_full[df_roster_full['Status_Category'] == "QUESTIONABLE"].copy()
+    if not df_questionable.empty:
+        df_questionable = df_questionable[display_cols].rename(columns={
+            p_name_col: 'Nom du Joueur',
+            'position': 'Poste',
+            'team': 'Équipe',
+            'depth_team': 'Ordre Chart',
+            'report_status': 'Statut Médical',
+            'Remplaçant Proposé': 'Remplaçant Proposé'
+        })
+        st.dataframe(df_questionable.reset_index(drop=True), width="stretch")
+    else:
+        st.info("Aucun joueur questionable pour cette sélection.")
