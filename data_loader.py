@@ -123,7 +123,6 @@ def load_data_for_2026_season():
         except Exception:
             depth_charts = pd.DataFrame()
 
-    # Uniformisation de la colonne 'depth_team' ou 'pos_rank'
     if not depth_charts.empty:
         if 'pos_rank' in depth_charts.columns and 'depth_team' not in depth_charts.columns:
             depth_charts['depth_team'] = depth_charts['pos_rank']
@@ -143,15 +142,21 @@ def load_data_for_2026_season():
 
 
 def calculate_2025_player_baselines(df_players_base, def_pos_stats):
-    """Calcule les moyennes et le nombre de matchs joués pour la saison de référence."""
+    """Calcule les moyennes, matchs joués et dernière équipe 2025 pour détecter les transferts."""
     df_players_base = df_players_base.sort_values(by=['player_id', 'week'])
 
-    player_stats = df_players_base.groupby(['player_id', 'player_name', 'position']).agg(
-        games_played_2025=('week', 'nunique'),
-        pass_yds_avg=('passing_yards', 'mean'),
-        rush_yds_avg=('rushing_yards', 'mean'),
-        rec_yds_avg=('receiving_yards', 'mean'),
-    ).reset_index()
+    team_col = 'recent_team' if 'recent_team' in df_players_base.columns else ('team' if 'team' in df_players_base.columns else None)
+
+    agg_dict = {
+        'games_played_2025': ('week', 'nunique'),
+        'pass_yds_avg': ('passing_yards', 'mean'),
+        'rush_yds_avg': ('rushing_yards', 'mean'),
+        'rec_yds_avg': ('receiving_yards', 'mean')
+    }
+    if team_col:
+        agg_dict['team_2025'] = (team_col, 'last')
+
+    player_stats = df_players_base.groupby(['player_id', 'player_name', 'position']).agg(**agg_dict).reset_index()
 
     df_players_base['rec_l3'] = df_players_base.groupby('player_id')['receiving_yards'].transform(lambda x: x.tail(3).mean())
     df_players_base['rush_l3'] = df_players_base.groupby('player_id')['rushing_yards'].transform(lambda x: x.tail(3).mean())
