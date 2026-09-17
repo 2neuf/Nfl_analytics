@@ -1,12 +1,14 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from data_loader import (
     load_data_for_2026_season,
     calculate_2025_player_baselines,
     calculate_2025_defense_by_position,
     calculate_2026_player_baselines,
     calculate_2026_defense_by_position,
-    calculate_team_scoring_stats
+    calculate_team_scoring_stats,
+    get_current_nfl_week
 )
 
 st.set_page_config(page_title="NFL Mismatch Finder 2026", layout="wide")
@@ -28,9 +30,12 @@ def get_dashboard_data():
 with st.spinner("Chargement des données NFL en cours..."):
     players_df, schedule_2026, roster_2026, injuries_df, sleeper_df, def_df, players_2026_df, def_2026_df, depth_charts, base_year, team_scoring_2025, team_scoring_2026 = get_dashboard_data()
 
-st.info(f"💡 Données de référence basées sur la saison **{base_year}**.")
+# --- CALCUL AUTOMATIQUE DE LA SEMAINE EN COURS ---
+current_week = get_current_nfl_week(schedule_2026)
 
-tab_players, tab_teams, tab_injuries = st.tabs(["🏃 Mismatch Joueurs", "🏈 Mismatch Scoring Équipes", "🏥 Infirmier & Profondeur"])
+st.info(f"💡 Données de référence : saison **{base_year}** | 📅 **Semaine NFL courante (auto-détectée) : Semaine {current_week}**")
+
+tab_players, tab_teams, tab_injuries = st.tabs(["🏃 Mismatch Joueurs", "🏈 Mismatch Scoring Équipes", "🏥 Infirmerie & Profondeur"])
 
 # ==============================================================================
 # TAB 1: MISMATCH JOUEURS
@@ -38,13 +43,9 @@ tab_players, tab_teams, tab_injuries = st.tabs(["🏃 Mismatch Joueurs", "🏈 M
 with tab_players:
     st.markdown("### ⚙️ Options de filtrage (Joueurs)")
 
-    col_week, col_game, col_crit, col_adv, col_limit = st.columns([1, 2.2, 3, 2.2, 1.4])
+    col_game, col_crit, col_adv, col_limit = st.columns([2.5, 3, 2.2, 1.4])
 
-    with col_week:
-        available_weeks = sorted(schedule_2026['week'].unique()) if 'week' in schedule_2026.columns else [1]
-        selected_week = st.selectbox("Semaine NFL", options=available_weeks, index=0, key="week_players")
-
-    week_schedule = schedule_2026[schedule_2026['week'] == selected_week] if 'week' in schedule_2026.columns else schedule_2026
+    week_schedule = schedule_2026[schedule_2026['week'] == current_week] if 'week' in schedule_2026.columns else schedule_2026
 
     with col_game:
         if not week_schedule.empty and 'away_team' in week_schedule.columns and 'home_team' in week_schedule.columns:
@@ -68,9 +69,7 @@ with tab_players:
         selected_criterion = st.selectbox("Critère d'analyse", options=list(criterion_options.keys()))
 
     target_position, stat_category = criterion_options[selected_criterion]
-
-    default_team_limits = {"QB": 1, "RB": 2, "WR": 3, "TE": 1}
-    default_limit = default_team_limits.get(target_position, 1)
+    default_limit = {"QB": 1, "RB": 2, "WR": 3, "TE": 1}.get(target_position, 1)
 
     with col_adv:
         filter_advantage = st.selectbox(
@@ -138,7 +137,7 @@ with tab_players:
         df_merged[def_2026_rank] = None
 
     if not injuries_df.empty and 'week' in injuries_df.columns:
-        inj_week = injuries_df[injuries_df['week'] == selected_week]
+        inj_week = injuries_df[injuries_df['week'] == current_week]
         inj_key = 'player_id' if ('player_id' in df_merged.columns and 'player_id' in inj_week.columns) else 'player_name'
         cols_inj = [inj_key, 'report_status'] if 'report_status' in inj_week.columns else [inj_key]
         df_merged = pd.merge(df_merged, inj_week[cols_inj], on=inj_key, how='left')
@@ -264,7 +263,7 @@ with tab_players:
             res_df.index = res_df.index + 1
 
             title_suffix = f" — {selected_game}" if selected_game != "Toutes les rencontres" else ""
-            st.subheader(f"Matchups Semaine {selected_week}{title_suffix}")
+            st.subheader(f"Matchups Semaine {current_week}{title_suffix}")
             st.caption(f"🎯 **Critère sélectionné :** {selected_criterion} | Max. {max_players_per_team} {target_position} actif(s) par équipe")
 
             st.dataframe(res_df, width="stretch")
@@ -277,21 +276,15 @@ with tab_players:
 with tab_teams:
     st.markdown("### ⚙️ Options de filtrage (Équipes)")
 
-    col_t_week, col_t_game = st.columns([1, 2.5])
+    week_team_schedule = schedule_2026[schedule_2026['week'] == current_week] if 'week' in schedule_2026.columns else schedule_2026
 
-    with col_t_week:
-        selected_team_week = st.selectbox("Semaine NFL", options=available_weeks, index=0, key="week_teams")
-
-    week_team_schedule = schedule_2026[schedule_2026['week'] == selected_team_week] if 'week' in schedule_2026.columns else schedule_2026
-
-    with col_t_game:
-        if not week_team_schedule.empty and 'away_team' in week_team_schedule.columns and 'home_team' in week_team_schedule.columns:
-            t_game_options = ["Toutes les rencontres"] + [
-                f"{row['away_team']} @ {row['home_team']}" for _, row in week_team_schedule.iterrows()
-            ]
-        else:
-            t_game_options = ["Toutes les rencontres"]
-        selected_team_game = st.selectbox("Rencontre", options=t_game_options, key="game_teams")
+    if not week_team_schedule.empty and 'away_team' in week_team_schedule.columns and 'home_team' in week_team_schedule.columns:
+        t_game_options = ["Toutes les rencontres"] + [
+            f"{row['away_team']} @ {row['home_team']}" for _, row in week_team_schedule.iterrows()
+        ]
+    else:
+        t_game_options = ["Toutes les rencontres"]
+    selected_team_game = st.selectbox("Rencontre", options=t_game_options, key="game_teams")
 
     st.markdown("---")
 
@@ -374,7 +367,7 @@ with tab_teams:
         final_team_df.index = final_team_df.index + 1
 
         t_title_suffix = f" — {selected_team_game}" if selected_team_game != "Toutes les rencontres" else ""
-        st.subheader(f"Scoring Équipes Semaine {selected_team_week}{t_title_suffix}")
+        st.subheader(f"Scoring Équipes Semaine {current_week}{t_title_suffix}")
         st.dataframe(final_team_df, width="stretch")
     else:
         st.warning("Aucune rencontre trouvée pour cette semaine.")
@@ -385,29 +378,20 @@ with tab_teams:
 with tab_injuries:
     st.markdown("### ⚙️ Options de filtrage (Infirmerie)")
 
-    col_i_week, col_i_team = st.columns([1, 2.5])
-
-    with col_i_week:
-        selected_inj_week = st.selectbox("Semaine NFL", options=available_weeks, index=0, key="week_injuries")
-
-    # --- RESTRICTION À LA SEMAINE EN COURS ---
-    week_inj_schedule = schedule_2026[schedule_2026['week'] == selected_inj_week] if 'week' in schedule_2026.columns else schedule_2026
+    week_inj_schedule = schedule_2026[schedule_2026['week'] == current_week] if 'week' in schedule_2026.columns else schedule_2026
     
     if not week_inj_schedule.empty and 'home_team' in week_inj_schedule.columns and 'away_team' in week_inj_schedule.columns:
         teams_playing_this_week = set(week_inj_schedule['home_team'].dropna()).union(set(week_inj_schedule['away_team'].dropna()))
     else:
         teams_playing_this_week = set(roster_2026['team'].dropna().unique()) if 'team' in roster_2026.columns else set()
 
-    with col_i_team:
-        available_teams_week = sorted(list(teams_playing_this_week))
-        selected_inj_team = st.selectbox("Équipe", options=["Toutes les équipes de la semaine"] + available_teams_week, key="team_injuries")
+    available_teams_week = sorted(list(teams_playing_this_week))
+    selected_inj_team = st.selectbox("Équipe", options=["Toutes les équipes de la semaine"] + available_teams_week, key="team_injuries")
 
     st.markdown("---")
 
-    # Filtrage initial du roster : uniquement les équipes qui jouent cette semaine
     df_roster_full = roster_2026[roster_2026['team'].isin(teams_playing_this_week)].copy()
 
-    # Fusion des Depth Charts
     if not depth_charts.empty:
         if 'gsis_id' in depth_charts.columns and 'player_id' not in depth_charts.columns:
             depth_charts['player_id'] = depth_charts['gsis_id']
@@ -417,22 +401,19 @@ with tab_injuries:
     if 'depth_team' not in df_roster_full.columns:
         df_roster_full['depth_team'] = None
 
-    # Fusion des blessures de la semaine sélectionnée
     if not injuries_df.empty and 'week' in injuries_df.columns:
-        inj_w = injuries_df[injuries_df['week'] == selected_inj_week]
+        inj_w = injuries_df[injuries_df['week'] == current_week]
         inj_k = 'player_id' if ('player_id' in df_roster_full.columns and 'player_id' in inj_w.columns) else 'player_name'
         cols_inj_w = [inj_k, 'report_status'] if 'report_status' in inj_w.columns else [inj_k]
         df_roster_full = pd.merge(df_roster_full, inj_w[cols_inj_w], on=inj_k, how='left')
     else:
         df_roster_full['report_status'] = None
 
-    # Fusion Sleeper
     if not sleeper_df.empty and 'gsis_id' in sleeper_df.columns and 'player_id' in df_roster_full.columns:
         df_roster_full = pd.merge(df_roster_full, sleeper_df[['gsis_id', 'sleeper_status']], left_on='player_id', right_on='gsis_id', how='left')
     else:
         df_roster_full['sleeper_status'] = None
 
-    # Normalisation des statuts
     slp_series = df_roster_full['sleeper_status'].astype(str).str.upper()
     rep_series = df_roster_full['report_status'].astype(str).str.upper()
 
@@ -449,11 +430,9 @@ with tab_injuries:
     df_roster_full.loc[is_doubtful, 'Status_Category'] = "DOUBTFUL"
     df_roster_full.loc[is_out, 'Status_Category'] = "OUT_IR_NA"
 
-    # Filtrage par équipe si une équipe spécifique est sélectionnée
     if selected_inj_team != "Toutes les équipes de la semaine":
         df_roster_full = df_roster_full[df_roster_full['team'] == selected_inj_team].copy()
 
-    # Isolement des joueurs disponibles pour le remplacement
     available_players = df_roster_full[df_roster_full['Status_Category'] == "AVAILABLE"]
 
     def get_fast_replacement(row):
@@ -478,7 +457,6 @@ with tab_injuries:
         d_str = f" (Depth {int(next_p['depth_team'])})" if pd.notnull(next_p.get('depth_team')) else ""
         return f"{next_p.get('player_name', next_p.get('full_name', 'Inconnu'))}{d_str}"
 
-    # Calcul restreint aux seuls joueurs indisponibles
     injured_mask = df_roster_full['Status_Category'] != "AVAILABLE"
     df_roster_full['Remplaçant Proposé'] = "-"
     if injured_mask.any():
@@ -487,7 +465,6 @@ with tab_injuries:
     p_name_col = 'player_name' if 'player_name' in df_roster_full.columns else 'full_name'
     display_cols = [c for c in [p_name_col, 'position', 'team', 'depth_team', 'report_status', 'Remplaçant Proposé'] if c in df_roster_full.columns]
 
-    # Render des 3 tableaux
     def render_injury_table(title, cat_code, default_msg):
         st.subheader(title)
         df_sub = df_roster_full[df_roster_full['Status_Category'] == cat_code]
