@@ -400,7 +400,6 @@ with tab_injuries:
         if 'gsis_id' in depth_charts.columns and 'player_id' not in depth_charts.columns:
             depth_charts['player_id'] = depth_charts['gsis_id']
         
-        # fallback sur pos_rank / depth_team
         depth_col = 'depth_team' if 'depth_team' in depth_charts.columns else ('pos_rank' if 'pos_rank' in depth_charts.columns else None)
         
         if depth_col and 'player_id' in depth_charts.columns:
@@ -432,18 +431,31 @@ with tab_injuries:
     else:
         df_roster_full['sleeper_status'] = None
 
-    # Harmonisation et remplissage des trous
-    def get_display_medical_status(row):
-        rep = str(row['report_status']).strip() if pd.notnull(row.get('report_status')) and str(row.get('report_status')).lower() != 'none' else ""
-        slp = str(row['sleeper_status']).strip() if pd.notnull(row.get('sleeper_status')) and str(row.get('sleeper_status')).lower() != 'none' else ""
-        
-        if rep:
-            return rep.upper()
-        if slp:
-            return slp.upper()
-        return "DISPO"
+    # Jointure Matchs Joués & Ancienne Équipe 2025
+    if 'player_id' in players_df.columns and 'games_played_2025' in players_df.columns:
+        cols_p25 = ['player_id', 'games_played_2025']
+        if 'team_2025' in players_df.columns:
+            cols_p25.append('team_2025')
+        df_roster_full = pd.merge(df_roster_full, players_df[cols_p25], on='player_id', how='left')
 
-    df_roster_full['Statut Médical'] = df_roster_full.apply(get_display_medical_status, axis=1)
+    def format_matchs_2025(row):
+        gp = row.get('games_played_2025')
+        if pd.isna(gp) or gp == 0:
+            return "0"
+        t_2025 = row.get('team_2025')
+        curr_t = row.get('team')
+        if pd.notna(t_2025) and str(t_2025).strip() != str(curr_t).strip():
+            return f"{int(gp)} ({t_2025})"
+        return f"{int(gp)}"
+
+    df_roster_full['Matchs 2025'] = df_roster_full.apply(format_matchs_2025, axis=1)
+
+    # Jointure Matchs Joués 2026
+    if 'player_id' in players_2026_df.columns and 'games_played_2026' in players_2026_df.columns:
+        df_roster_full = pd.merge(df_roster_full, players_2026_df[['player_id', 'games_played_2026']], on='player_id', how='left')
+        df_roster_full['Matchs 2026'] = df_roster_full['games_played_2026'].fillna(0).astype(int)
+    else:
+        df_roster_full['Matchs 2026'] = 0
 
     slp_series = df_roster_full['sleeper_status'].astype(str).str.upper()
     rep_series = df_roster_full['report_status'].astype(str).str.upper()
@@ -494,7 +506,7 @@ with tab_injuries:
         df_roster_full.loc[injured_mask, 'Remplaçant Proposé'] = df_roster_full[injured_mask].apply(get_fast_replacement, axis=1)
 
     p_name_col = 'player_name' if 'player_name' in df_roster_full.columns else 'full_name'
-    display_cols = [c for c in [p_name_col, 'position', 'team', 'depth_team', 'Statut Médical', 'Remplaçant Proposé'] if c in df_roster_full.columns]
+    display_cols = [c for c in [p_name_col, 'position', 'team', 'depth_team', 'Matchs 2025', 'Matchs 2026', 'Remplaçant Proposé'] if c in df_roster_full.columns]
 
     def render_injury_table(title, cat_code, default_msg):
         st.subheader(title)
